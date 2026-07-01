@@ -1,0 +1,166 @@
+/* Obsidian 代码块样式，近似飞书风格，适配 1.12.x */
+
+:root {
+  --feishu-code-bg: #f7f8fa;
+  --feishu-code-border: #d9dde4;
+  --feishu-code-text: #2b2f36;
+  --feishu-code-gutter: #6b7280;
+  --feishu-keyword: #c026d3;
+  --feishu-function: #2563eb;
+  --feishu-string: #43a047;
+  --feishu-number: #0ea5e9;
+  --feishu-comment: #9aa3af;
+  --feishu-operator: #4b5563;
+  --feishu-variable: #2b2f36;
+  --feishu-property: #0f766e;
+  --feishu-type: #b7791f;
+  --feishu-tag: #c026d3;
+  --feishu-punctuation: #4b5563;
+}
+
+/* 阅读视图：代码块容器 */
+.markdown-rendered pre {
+  background: var(--feishu-code-bg) !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 12px 16px !important;
+}
+
+.markdown-rendered pre code {
+  background: transparent !important;
+  color: var(--feishu-code-text) !important;
+  font-size: 0.95em !important;
+  line-height: 1.75 !important;
+}
+
+/* 编辑视图：代码块整体浅灰背景 */
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-codeblock {
+  background-color: var(--feishu-code-bg) !important;
+  color: var(--feishu-code-text) !important;
+  line-height: 1.75 !important;
+}
+
+/* 编辑视图：代码块首尾围栏 */
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-codeblock.HyperMD-codeblock-begin,
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-codeblock.HyperMD-codeblock-end,
+.cm-s-obsidian .HyperMD-codeblock-begin,
+.cm-s-obsidian .HyperMD-codeblock-end {
+  background-color: var(--feishu-code-bg) !important;
+  color: var(--feishu-comment) !important;
+}
+
+/* 编辑视图：代码块左侧不加围栏 */
+.markdown-source-view.mod-cm6 .cm-line.HyperMD-codeblock {
+  border-left: 0 !important;
+  padding-left: 12px !important;
+}
+
+/* 编辑视图：语法高亮 */
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-keyword,
+.cm-s-obsidian .HyperMD-codeblock .cm-keyword {
+  color: var(--feishu-keyword) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-string,
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-string-2,
+.cm-s-obsidian .HyperMD-codeblock .cm-string,
+.cm-s-obsidian .HyperMD-codeblock .cm-string-2 {
+  color: var(--feishu-string) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-number,
+.cm-s-obsidian .HyperMD-codeblock .cm-number {
+  color: var(--feishu-number) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-comment,
+.cm-s-obsidian .HyperMD-codeblock .cm-comment {
+  color: var(--feishu-comment) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-operator,
+.cm-s-obsidian .HyperMD-codeblock .cm-operator {
+  color: var(--feishu-operator) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-def,
+.cm-s-obsidian .HyperMD-codeblock .cm-def {
+  color: var(--feishu-function) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-variable,
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-variable-2,
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-variable-3,
+.cm-s-obsidian .HyperMD-codeblock .cm-variable,
+.cm-s-obsidian .HyperMD-codeblock .cm-variable-2,
+.cm-s-obsidian .HyperMD-codeblock .cm-variable-3 {
+  color: var(--feishu-variable) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-property,
+.cm-s-obsidian .HyperMD-codeblock .cm-property {
+  color: var(--feishu-property) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-type,
+.cm-s-obsidian .HyperMD-codeblock .cm-type {
+  color: var(--feishu-type) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-tag,
+.cm-s-obsidian .HyperMD-codeblock .cm-tag {
+  color: var(--feishu-tag) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-attribute,
+.cm-s-obsidian .HyperMD-codeblock .cm-attribute {
+  color: var(--feishu-type) !important;
+}
+
+.markdown-source-view.mod-cm6 .HyperMD-codeblock .cm-punctuation,
+.cm-s-obsidian .HyperMD-codeblock .cm-punctuation {
+  color: var(--feishu-punctuation) !important;
+}
+
+/* 阅读视图：语法高亮 */
+.markdown-rendered pre code {
+  color: var(--feishu-code-text) !important;
+}
+
+.markdown-rendered code .token.keyword {
+  color: var(--feishu-keyword) !important;
+}
+
+.markdown-rendered code .token.string {
+  color: var(--feishu-string) !important;
+}
+
+.markdown-rendered code .token.number,
+.markdown-rendered code .token.boolean {
+  color: var(--feishu-number) !important;
+}
+
+.markdown-rendered code .token.comment {
+  color: var(--feishu-comment) !important;
+}
+
+.markdown-rendered code .token.function {
+  color: var(--feishu-function) !important;
+}
+
+.markdown-rendered code .token.tag {
+  color: var(--feishu-tag) !important;
+}
+
+.markdown-rendered code .token.operator {
+  color: var(--feishu-operator) !important;
+}
+
+.markdown-rendered code .token.punctuation {
+  color: var(--feishu-punctuation) !important;
+}
+
+.markdown-rendered code .token.property {
+  color: var(--feishu-property) !important;
+}

@@ -1,0 +1,10 @@
+{
+  "id": "selection-format-toolbar",
+  "name": "Selection Format Toolbar",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Shows a floating formatting toolbar when you select text: bold, italic, headings 1-6, and multi-color highlighting.",
+  "author": "Avinash",
+  "authorUrl": "https://github.com/avinashingit",
+  "isDesktopOnly": false
+}

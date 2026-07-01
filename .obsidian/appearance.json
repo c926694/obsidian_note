@@ -1,0 +1,15 @@
+{
+  "theme": "system",
+  "interfaceFontFamily": "LXGW WenKai",
+  "cssTheme": "",
+  "accentColor": "",
+  "textFontFamily": "LXGW WenKai",
+  "monospaceFontFamily": "JetBrains Mono",
+  "enabledCssSnippets": [
+    "code-colors"
+  ],
+  "nativeMenus": false,
+  "baseFontSize": 17,
+  "baseFontSizeAction": false,
+  "showRibbon": true
+}
