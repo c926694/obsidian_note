@@ -3,7 +3,7 @@
 ## 创建
 通过init_chat_model函数统一创建模型对象
 四个参数如下代码块
-
+666
 ```python
 # 用dotenv读取环境变量  
 from dotenv import load_dotenv  
