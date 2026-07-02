@@ -808,24 +808,36 @@ name = "chat_assistant"
 )
 ```
 ## 结构化输出
+让agent的输出是结构化的
+### ToolStrategy
+ToolStrategy通过工具调用（Tool Calling/Function Calling）实现结构化输出
 ```py
-class ContactInfo(BaseModel):  
-    """联系人信息"""  
-    email: str = Field(description="邮箱地址")  
-    phone: str = Field(description="手机号")  
-    name: str = Field(description="姓名")  
-  
-  
-agent = create_agent(  
-    model=model,  
-    response_format=ProviderStrategy(ContactInfo),  
-)  
-  
-response = agent.invoke({  
-    "messages": [  
-        HumanMessage("从这段话中抽取结构化信息：小明的邮箱地址为：shkstart@atguigu.com，手机号：12345678912")  
-    ]  
-})  
-  
-rprint(response["structured_response"])
+from pydantic import BaseModel
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
+# 2.Pydantic结构化方式定义
+class ContactInfo(BaseModel):
+    name: str = Field(description="姓名")
+    email: str = Field(description="邮箱")
+    phone: str = Field(description="电话")
+# 3.工具的定义（根据需要定义）
+@tool
+def search_tool(query: str) -> str:
+    """这是一个搜索引擎。当大模型发现给定的上下文里缺少必要的联系人信息，
+    需要去互联网上查询时，才会调用这个工具。
+    """
+    return f"搜索结果: 未找到关于 '{query}' 的更多额外信息。"
+# 3.agent初始化
+agent = create_agent(
+    model=model,
+    tools=[search_tool],
+    response_format=ToolStrategy(ContactInfo)
+)
+result = agent.invoke({
+    "messages": [{"role": "user", "content": "联系人信息: John Doe,
+john@atguigu.com, (010) 56253825"
+})
+# print(result)
+print(result["structured_response"])
+name='John Doe' email='john@atguigu.com' phone='(010) 56253825'
 ```
