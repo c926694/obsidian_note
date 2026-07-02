@@ -437,6 +437,8 @@ else :
     print(result.content)
 ```
 ### **手动模拟agent调用工具**
+1. llm生成AIMessage
+2. 
 ```py
 from langchain.messages import HumanMessage, ToolMessage
 @tool
