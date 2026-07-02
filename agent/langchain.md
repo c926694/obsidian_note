@@ -842,35 +842,10 @@ print(result["structured_response"])
 name='John Doe' email='john@atguigu.com' phone='(010) 56253825'
 ```
 ## 流式输出
+### values
+每个步骤执行后，都会输出**完整的状态信息**，适用于每一步都要获取完整状态、状态持久化
+
 ```py
-@tool  
-def query_customer_data(customer_id: str) -> Dict[str, Any]:  
-    """查询客户基本信息.  
-    Args:        customer_id: 客户ID  
-    """    return {"name": "张三", "level": "VIP", "join_date": "2023-01-15"}  
-  
-  
-@tool  
-def check_order_history(customer_id: str) -> Dict[str, Any]:  
-    """查询客户订单历史.  
-    Args:        customer_id: 客户ID  
-    """    return {"total_orders": 15, "total_spent": 25800.00}  
-  
-  
-@tool  
-def get_current_promotions() -> Dict[str, Any]:  
-    """获取当前可用促销活动."""  
-    return {  
-        "promotions": ["老用户优惠", "会员专属折扣"],  
-        "valid_until": "2027-01-31"  
-    }  
-  
-  
-agent = create_agent(  
-    model=model,  
-    tools=[query_customer_data, check_order_history, get_current_promotions],  
-)  
-  
 # 流式：stream_mode="values" 返回完整的消息历史快照  
 for chunk in agent.stream(  
     {"messages": [{"role": "user", "content": "查询客户ID为 CUST123456 的个人信息、历史订单和可用优惠"}]},  
@@ -880,3 +855,5 @@ for chunk in agent.stream(
     if isinstance(last_msg, AIMessage) and last_msg.content:  
         print(last_msg.content)
 ```
+
+![[Pasted image 20260702164124.png]]
