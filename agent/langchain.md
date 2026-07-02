@@ -406,3 +406,5 @@ for chunk in model.stream( result):
 # human: Python协程怎么做  
 # ai: 用 async/await...# human: 再讲详细点
 ```
+# 工具
+## 调用
