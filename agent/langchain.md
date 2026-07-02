@@ -698,7 +698,7 @@ agent = create_agent(
 invoke是同步调用方法，它会阻塞程序执行直到返回最终结果
 输入：传入的参数为字典类型，字典内通过messages字段传递消息列表。即：“ {"messages": [{"role": "...", "content": "..."}]} ”
 
-输出：通过invoke调用Agent，底层可能会经历多轮交互，返回的是**完整的消息列表**，被封装在字典中，是messages字段的值。
+输出：通过invoke调用Agent，底层可能会经历多轮交互，返回的是**完整的消息列表**，**被封装在字典中**，是messages字段的值。
 ```py
 response = agent.invoke({"messages": [...]})
 # response 是字典类型
@@ -712,4 +712,28 @@ response = agent.invoke({"messages": [...]})
 }
 # 获取最终回答
 final_answer = response['messages'][-1].content
+```
+## 绑定工具
+
+```py
+@tool(parse_docstring=True)  
+def get_weather(city: str) -> str:  
+    """  
+    天气查询工具  
+  
+    Args:        city: 城市名称  
+    """    return f"{city}的天气为晴朗，25°C。"  
+  
+  
+agent = create_agent(  
+    model=model,  
+    tools=[get_weather]  
+)  
+resp = agent.invoke({  
+    "messages": [  
+        {"role": "system", "content": "你是一个天气查询助手，只回答天气相关的问题，其他问题请直接回答：我不清楚这问题答案。"},  
+        {"role": "user", "content": "北京的天气怎么样？"}  
+]  
+})  
+rprint(resp["messages"][-1].content)
 ```
