@@ -655,3 +655,9 @@ result = structured_llm.invoke("张三 30岁，李四 25岁")
 print(result)
 people=[Person(name='张三', age=30), Person(name='李四', age=25)]
 ```
+# agent
+在计算机科学里，agent（智能体）指一个能**感知环境**、**自主决策**、**执行动作**的实体。核心循环是：
+**感知 → 思考/决策 → 执行 → 观察结果 → 循环**
+
+
+![[Pasted image 20260702142055.png]]
