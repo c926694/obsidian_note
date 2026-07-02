@@ -441,6 +441,8 @@ else :
 2. 判断AIMessage的tool_calls有无调用的工具
 3. 有工具则寻找我们写好的get_weather工具并调用
 4. tool.invoke生成ToolMessage
+5. 将ToolMessage添加到messages中
+6. llm基于ToolMessage做出判断
 ```py
 from langchain.messages import HumanMessage, ToolMessage
 @tool
