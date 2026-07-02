@@ -425,3 +425,14 @@ def get_weather(city: str) -> str:
 result = get_weather.invoke({"city": "北京"})  
 print(result)
 ```
+**绑定大模型调用**
+invoke返回一个AIMessage对象，里面tool_calls表示大模型这次回答想调用的工具
+但是llm
+```py
+model_with_tools = model.bind_tools([get_weather])  
+result = model_with_tools.invoke("北京天气")  
+if result.tool_calls:  
+    print(result.tool_calls)  
+else :  
+    print(result.content)
+```
