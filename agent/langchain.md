@@ -857,3 +857,30 @@ for chunk in agent.stream(
 ```
 
 ![[Pasted image 20260702164124.png]]
+### updates
+只增量更新状态中发生变化的内容，是默认模式
+```py
+# 其他工具代码同上，保持不变
+# ... ...
+for chunk in customer_service_agent.stream(
+        {"messages": [{"role": "user","content": "查询客户ID为 CUST123456 的完整
+信息和可用优惠"
+        stream_mode="updates"
+):
+    rprint(chunk)
+    print("-" * 50)
+```
+### messages
+该模式中会输出流式返回的Token以及相关的元数据（如：来自哪个节点），
+可以用在实现类似 ChatGPT 的打字机效果场景
+```py
+# 其他工具代码同上，保持不变
+# ... ...
+for chunk in customer_service_agent.stream(
+        {"messages": [{"role": "user","content": "查询客户ID为 CUST123456 的完整
+信息和可用优惠"
+        stream_mode="tasks"
+):
+    print(chunk)
+    print("-" * 50)
+```
