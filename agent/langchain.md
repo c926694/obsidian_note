@@ -714,6 +714,7 @@ response = agent.invoke({"messages": [...]})
 final_answer = response['messages'][-1].content
 ```
 ## 绑定工具
+![[Pasted image 20260702151352.png]]
 ### 内部函数tool
 ```py
 @tool(parse_docstring=True)  
@@ -756,4 +757,53 @@ resp = agent.invoke({
 })  
 rprint(resp["messages"][-1].content)
 ```
-![[Pasted image 20260702150347.png]]
+### 重试机制
+```py
+from langchain.agents import create_agent
+from langchain.tools import tool
+from langchain.messages import SystemMessage, HumanMessage
+from dotenv import load_dotenv
+from rich import print as rprint
+load_dotenv(override=True)
+flag = 0
+@tool
+def get_weather(city: str):
+    """
+    天气查询工具
+    Args:
+        city: 城市名称
+    """
+    global flag
+    flag += 1
+    if flag < 3:
+        # raise Exception("暂时无法访问")
+        return "TEMP_UNAVAILABLE: 天气服务暂时不可用，请稍后重试"
+    return f"{city}今天天气挺好"
+messages = [
+    SystemMessage("""
+    你是一个天气助手。
+    当工具返回以 'TEMP_UNAVAILABLE:' 开头的结果时，
+    说明是临时故障，不要立即放弃；
+    你应再次调用同一个工具，最多重试 3 次。
+    如果 3 次后仍失败，再向用户说明服务暂时不可用。
+    """
+    HumanMessage("你好，杭州今天的天气如何？")
+]
+agent = create_agent(model, tools=[get_weather])
+response = agent.invoke({"messages": messages})
+# rprint(response)
+for msg in response["messages"]:
+    msg.pretty_print()
+```
+## agent名字
+创建agent的时候指定名字
+Multi-Agent 场景使用name
+```py
+agent = create_agent(
+
+model=model,
+
+name = "chat_assistant"
+
+)
+```
