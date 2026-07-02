@@ -807,3 +807,25 @@ name = "chat_assistant"
 
 )
 ```
+## 结构化输出
+```py
+class ContactInfo(BaseModel):  
+    """联系人信息"""  
+    email: str = Field(description="邮箱地址")  
+    phone: str = Field(description="手机号")  
+    name: str = Field(description="姓名")  
+  
+  
+agent = create_agent(  
+    model=model,  
+    response_format=ProviderStrategy(ContactInfo),  
+)  
+  
+response = agent.invoke({  
+    "messages": [  
+        HumanMessage("从这段话中抽取结构化信息：小明的邮箱地址为：shkstart@atguigu.com，手机号：12345678912")  
+    ]  
+})  
+  
+rprint(response["structured_response"])
+```
