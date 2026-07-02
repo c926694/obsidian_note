@@ -661,3 +661,55 @@ people=[Person(name='张三', age=30), Person(name='李四', age=25)]
 
 
 ![[Pasted image 20260702142055.png]]
+## 创建
+```py
+from langchain.chat_models import init_chat_model
+from langchain.agents import create_agent
+# 1. 初始化模型
+model = init_chat_model("gpt-4o-mini", model_provider="openai")
+# 2. 创建 agent（一步完成）
+agent = create_agent(
+    model=model,
+    tools=[tool1, tool2],
+    system_prompt="Agent 的行为指令"  # 可选
+)
+# 3. 调用
+result = agent.invoke({
+    "messages": [{"role": "user", "content": "问题"}]
+})
+```
+**多种参数**
+[参数](https://reference.langchain.com/python/langchain/agents/factory/create_agent)
+```py
+from langchain.agents import create_agent
+agent = create_agent(
+    model: str | BaseChatModel,            # 必需：聊天模型
+    tools: List[BaseTool],                 # 必需：工具列表
+    *,
+    system_prompt: str = "",               # 系统提示词
+    middleware: Seguence[AgentMiddleware[StateT_co, ContextT]] = () # 中间件
+    interrupt_before: List[str] = None,    # 在某些工具前暂停（人机协作）
+    interrupt_after: List[str] = None,     # 在某些工具后暂停
+    debug: bool = False                    # 调试模式
+    name: str 丨 None = None,              # 设置模型名称
+)
+```
+## 调用
+invoke是同步调用方法，它会阻塞程序执行直到返回最终结果
+输入：传入的参数为字典类型，字典内通过messages字段传递消息列表。即：“ {"messages": [{"role": "...", "content": "..."}]} ”
+
+输出：通过invoke调用Agent，底层可能会经历多轮交互，返回的是**完整的消息列表**，被封装在字典中，是messages字段的值。
+```py
+response = agent.invoke({"messages": [...]})
+# response 是字典类型
+{
+    "messages": [
+        HumanMessage(...),       # 用户问题
+        AIMessage(...),          # AI 工具调用
+        ToolMessage(...),        # 工具返回结果
+        AIMessage(...)           # 最终回答 ← 通常取这个
+    ]
+}
+# 获取最终回答
+final_answer = response['messages'][-1].content
+```
