@@ -566,6 +566,7 @@ convert_to_openai_tool(get_weather)
 通过在运行时强制执行类型提示，确保数据的正确性和一致性，是生产场景首选
 给llm规定一个输出类型,一定要有描述，否则会报错
 with_structured_output(Person)返回的是一个Runnable对象，invoke返回Person实例
+![[Pasted image 20260702135527.png]]
 ```py
 class Person(BaseModel):  
     """人物信息"""  
