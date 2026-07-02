@@ -406,3 +406,69 @@ for chunk in model.stream( result):
 # human: Python协程怎么做  
 # ai: 用 async/await...# human: 再讲详细点
 ```
+# 工具
+## 调用
+### **直接调用**
+@tool绑定函数赋予Invoke
+```py
+from langchain_core.tools import tool  
+@tool  
+def get_weather(city: str) -> str:  
+    """  
+    获取指定城市的天气信息  
+    参数:  
+        city: 城市名称，如"北京"、"上海"  
+    返回:  
+        天气信息字符串  
+    """    # 你的实现  
+    return city + "晴天，温度 15°C"# 使用 .invoke() 方法  
+result = get_weather.invoke({"city": "北京"})  
+print(result)
+```
+### **绑定大模型调用**
+invoke返回一个AIMessage对象，里面tool_calls表示大模型这次回答想调用的工具
+但是llm没有调用工具的能力
+```py
+model_with_tools = model.bind_tools([get_weather])  
+result = model_with_tools.invoke("北京天气")  
+if result.tool_calls:  
+    print(result.tool_calls)  
+else :  
+    print(result.content)
+```
+### **手动模拟agent调用工具**
+1. llm生成AIMessage
+2. 判断AIMessage的tool_calls有无调用的工具
+3. 有工具则寻找我们写好的get_weather工具并调用
+4. tool.invoke生成ToolMessage
+5. 将ToolMessage添加到messages中
+6. llm基于ToolMessage做出判断
+```py
+from langchain.messages import HumanMessage, ToolMessage
+@tool
+def get_weather(city: str):
+    """获取天气的工具"""
+    return f"{city}天气晴朗~"
+# 将模型和工具绑定
+model_with_tools = model.bind_tools([get_weather])
+messages = [
+    HumanMessage("今天北京天气如何")
+]
+# 模型生成调用工具请求
+response = model_with_tools.invoke(messages)
+# 添加AIMessage
+messages.append(response)
+tool_calls = response.tool_calls
+for tool_call in tool_calls:
+    if tool_call["name"] == "get_weather":
+        # 返回的是ToolMessage类型消息
+        tool_response = get_weather.invoke(tool_call)
+        print(type(tool_response))
+        messages.append(tool_response)
+print("=====================> messages <=====================")
+for msg in messages:
+    msg.pretty_print()
+print("=====================> messages <=====================")
+final_response = model_with_tools.invoke(messages)
+print(f"final_response: \n{final_response}")
+```
