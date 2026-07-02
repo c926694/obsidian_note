@@ -438,7 +438,9 @@ else :
 ```
 ### **手动模拟agent调用工具**
 1. llm生成AIMessage
-2. 
+2. 判断AIMessage的tool_calls有无调用的工具
+3. 有工具则寻找我们写好的get_weather工具并调用
+4. tool.invoke生成ToolMessage
 ```py
 from langchain.messages import HumanMessage, ToolMessage
 @tool
