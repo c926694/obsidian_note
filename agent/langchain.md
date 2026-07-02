@@ -560,3 +560,24 @@ False
     return result
 convert_to_openai_tool(get_weather)
 ```
+# 结构化输出
+要求**模型**最终返回一个**符合预定义结构的数据对象**，例如固定字段的**JSON**、**Pydantic 模型**、 **TypedDict**，而不再是无格式的自然语言文本。
+## pydantic
+通过在运行时强制执行类型提示，确保数据的正确性和一致性，是生产场景首选
+给llm规定一个输出类型
+```py
+class Person(BaseModel):  
+    """人物信息"""  
+    name: str = Field(description="姓名")  
+    age: int = Field(description="年龄")  
+    occupation: str = Field(description="职业")  
+  
+  
+structured_llm = model.with_structured_output(Person)  
+result = structured_llm.invoke("请以json格式提取下面的信息:张三是一名 30 岁的软件工程师")  
+print(result)  
+print(type(result))  
+print(result.name)  
+print(result.age)  
+print(result.occupation)
+```
