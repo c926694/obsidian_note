@@ -427,7 +427,7 @@ print(result)
 ```
 **绑定大模型调用**
 invoke返回一个AIMessage对象，里面tool_calls表示大模型这次回答想调用的工具
-但是llm
+但是llm没有调用工具的能力
 ```py
 model_with_tools = model.bind_tools([get_weather])  
 result = model_with_tools.invoke("北京天气")  
