@@ -472,3 +472,91 @@ print("=====================> messages <=====================")
 final_response = model_with_tools.invoke(messages)
 print(f"final_response: \n{final_response}")
 ```
+## @tool定义工具
+可以对工具进行description、Args、Returns的描述
+
+### description参数
+@tool 的参数description 可以更改工具描述，优先级高于docstring 的函数说明
+```py
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from langchain.tools import tool
+from rich import print as rprint
+@tool(description="根据城市名称查询当日天气的工具")
+def get_weather(city: str):
+    """
+    天气查询工具
+    """
+    return f"{city}天气晴朗"
+rprint(convert_to_openai_tool(get_weather))
+```
+### docstring
+当我们没有向@tool 传递description 参数时，默认情况下，tool 会将docstring 整体视为description
+通过将parse_docstring 设置为True，docstring会被解析，填充到相应的字段描述中
+```py
+from langchain_core.utils.function_calling import convert_to_openai_tool
+from rich import print as rprint
+@tool
+def get_weather(city: str, units: str = "celsius", include_forecast: bool =
+False
+    """
+    获取当日天气，可选择是否同时查询未来五日天气预报
+    Args:
+        city: 城市
+        units: 气温单位，可选：celsius-摄氏度，fahrenheit-华氏度
+        include_forecast: 是否包含未来五日的天气预报
+    """
+    temp = 22 if units == "celsius" else 72
+    result = f'{city}当天气温: {temp} {"摄氏度" if units == "celsius" else "华
+氏度"
+    if include_forecast:
+        result += "\n未来五天都是晴天"
+    return result
+rprint(convert_to_openai_tool(get_weather))
+```
+**docstring规范**
+```py
+def connect_to_next_port(self, minimum: int) -> int:
+    """Connects to the next available port.
+
+    Args:
+      minimum: A port value greater or equal to 1024.
+
+    Returns:
+      The new minimum port.
+
+    Raises:
+      ConnectionError: If no available port is found.
+    """
+```
+### 自定义args_schema
+通过pydantic定义工具的输入类，优先级高于函数签名的描述
+通过类描述传给llm更清晰
+```py
+from pydantic import BaseModel, Field
+from langchain.tools import tool
+from langchain_core.utils.function_calling import convert_to_openai_tool
+class WeatherInput(BaseModel):
+    city: str = Field(
+        default= "北京",
+        description="城市"
+    )
+    unit: Literal["celsius", "fahrenheit"] = Field(
+        default="celsius",
+        description="气温单位"
+    )
+    include_forecast: bool = Field(
+        default=False,
+        description="是否包含未来五日天气预报"
+    )
+@tool(args_schema=WeatherInput)
+def get_weather(city: str, unit: str = "celsius", include_forecast: bool =
+False
+    """获取当日天气，可选未来五日天气预报"""
+    temp = 22 if unit == "celsius" else 72
+    result = f'{city}当天气温: {temp} {"摄氏度" if unit == "celsius" else "华氏
+度"
+    if include_forecast:
+        result += "\n未来五天都是晴天"
+    return result
+convert_to_openai_tool(get_weather)
+```
