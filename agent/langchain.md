@@ -565,6 +565,7 @@ convert_to_openai_tool(get_weather)
 ## pydantic
 通过在运行时强制执行类型提示，确保数据的正确性和一致性，是生产场景首选
 给llm规定一个输出类型,一定要有描述，否则会报错
+with_structured_output(Person)返回的是一个Runnable对象，invoke返回Person实例
 ```py
 class Person(BaseModel):  
     """人物信息"""  
@@ -598,7 +599,7 @@ structured_llm.invoke("张三是一名医生")
 # Person(name='张三', age=None, occupation='医生')
 ```
 ### 默认值
-Filed指定
+Filed指定默认值，不过有的模型厂商无效
 ```py
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -621,4 +622,35 @@ print(result2)
 name='iPhone 15' price=5999.0 description='最新款智能手机' stock=50
 场景2：缺少描述和库存
 name='MacBook Pro' price=12999.0 description=None stock=100
+```
+### 枚举
+```py
+from enum import Enum
+class Priority(str, Enum):
+    LOW = "低"
+    MEDIUM = "中"
+    HIGH = "高"
+class Task(BaseModel):
+    title: str
+    priority: Priority  # 只能是 LOW/MEDIUM/HIGH
+```
+也可用Literal规定字段值
+```py
+urgency: Literal["低","中","高"] = Field(description="紧急程度")
+```
+### 列表提取
+输出结构是个列表，于是传PersonList
+```py
+from typing import List
+class Person(BaseModel):
+    """人物信息"""
+    name: str
+    age: int
+class PersonList(BaseModel):
+    """人物列表信息"""
+    people: List[Person]  # 多个 Person 对象
+structured_llm = model.with_structured_output(PersonList)
+result = structured_llm.invoke("张三 30岁，李四 25岁")
+print(result)
+people=[Person(name='张三', age=30), Person(name='李四', age=25)]
 ```
