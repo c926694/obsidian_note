@@ -408,7 +408,7 @@ for chunk in model.stream( result):
 ```
 # 工具
 ## 调用
-**直接调用**
+### **直接调用**
 @tool绑定函数赋予Invoke
 ```py
 from langchain_core.tools import tool  
@@ -425,7 +425,7 @@ def get_weather(city: str) -> str:
 result = get_weather.invoke({"city": "北京"})  
 print(result)
 ```
-**绑定大模型调用**
+### **绑定大模型调用**
 invoke返回一个AIMessage对象，里面tool_calls表示大模型这次回答想调用的工具
 但是llm没有调用工具的能力
 ```py
@@ -435,4 +435,34 @@ if result.tool_calls:
     print(result.tool_calls)  
 else :  
     print(result.content)
+```
+### **手动模拟agent调用工具**
+```py
+from langchain.messages import HumanMessage, ToolMessage
+@tool
+def get_weather(city: str):
+    """获取天气的工具"""
+    return f"{city}天气晴朗~"
+# 将模型和工具绑定
+model_with_tools = model.bind_tools([get_weather])
+messages = [
+    HumanMessage("今天北京天气如何")
+]
+# 模型生成调用工具请求
+response = model_with_tools.invoke(messages)
+# 添加AIMessage
+messages.append(response)
+tool_calls = response.tool_calls
+for tool_call in tool_calls:
+    if tool_call["name"] == "get_weather":
+        # 返回的是ToolMessage类型消息
+        tool_response = get_weather.invoke(tool_call)
+        print(type(tool_response))
+        messages.append(tool_response)
+print("=====================> messages <=====================")
+for msg in messages:
+    msg.pretty_print()
+print("=====================> messages <=====================")
+final_response = model_with_tools.invoke(messages)
+print(f"final_response: \n{final_response}")
 ```
