@@ -564,7 +564,7 @@ convert_to_openai_tool(get_weather)
 要求**模型**最终返回一个**符合预定义结构的数据对象**，例如固定字段的**JSON**、**Pydantic 模型**、 **TypedDict**，而不再是无格式的自然语言文本。
 ## pydantic
 通过在运行时强制执行类型提示，确保数据的正确性和一致性，是生产场景首选
-给llm规定一个输出类型
+给llm规定一个输出类型,一定要有描述，否则会报错
 ```py
 class Person(BaseModel):  
     """人物信息"""  
@@ -580,4 +580,45 @@ print(type(result))
 print(result.name)  
 print(result.age)  
 print(result.occupation)
+```
+### 可选字段
+Optional指定字段并表明是可选的
+invoke后未提到的字段值是None
+没用Optional的默认是字段零值
+```py
+from typing import Optional
+from pydantic import BaseModel, Field
+class Person(BaseModel):
+    """人物信息"""
+    name: str = Field(description="姓名")
+    age: Optional[int] = Field(description="年龄")
+    occupation: str = Field(description="职业")
+structured_llm = model_with_closeai.with_structured_output(Person)
+structured_llm.invoke("张三是一名医生")
+# Person(name='张三', age=None, occupation='医生')
+```
+### 默认值
+Filed指定
+```py
+from typing import Optional
+from pydantic import BaseModel, Field
+class Product(BaseModel):
+    """产品信息"""
+    name: str = Field(description="产品名称")
+    price: float = Field(description="价格")
+    description: Optional[str] = Field(description="产品描述")
+    stock: int = Field(default=100, description="库存")
+# 测试
+structured_llm = model_with_openrouter.with_structured_output(Product)
+print("\n场景1：完整信息")
+result1 = structured_llm.invoke("iPhone 15 售价 5999 元，最新款智能手机，库存 50
+台"
+print(result1)
+print("\n场景2：缺少描述和库存")
+result2 = structured_llm.invoke("MacBook Pro 售价 12999 元")
+print(result2)
+场景1：完整信息
+name='iPhone 15' price=5999.0 description='最新款智能手机' stock=50
+场景2：缺少描述和库存
+name='MacBook Pro' price=12999.0 description=None stock=100
 ```
