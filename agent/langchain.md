@@ -408,3 +408,20 @@ for chunk in model.stream( result):
 ```
 # 工具
 ## 调用
+**直接调用**
+@tool绑定函数赋予Invoke
+```py
+from langchain_core.tools import tool  
+@tool  
+def get_weather(city: str) -> str:  
+    """  
+    获取指定城市的天气信息  
+    参数:  
+        city: 城市名称，如"北京"、"上海"  
+    返回:  
+        天气信息字符串  
+    """    # 你的实现  
+    return city + "晴天，温度 15°C"# 使用 .invoke() 方法  
+result = get_weather.invoke({"city": "北京"})  
+print(result)
+```
