@@ -714,7 +714,7 @@ response = agent.invoke({"messages": [...]})
 final_answer = response['messages'][-1].content
 ```
 ## 绑定工具
-
+### 内部函数tool
 ```py
 @tool(parse_docstring=True)  
 def get_weather(city: str) -> str:  
@@ -737,3 +737,23 @@ resp = agent.invoke({
 })  
 rprint(resp["messages"][-1].content)
 ```
+### 外部api
+langchain内置了许多外部api工具
+```py
+web_search = TavilySearch(  
+    tavily_api_key=os.getenv("TAVILY_API_KEY"),  
+    max_results=2  
+)
+agent = create_agent(  
+    model=model,  
+    tools=[web_search]  
+)  
+resp = agent.invoke({  
+    "messages": [  
+        {"role": "system", "content": "你是一个天气查询助手，只回答天气相关的问题，其他问题请直接回答：我不清楚这问题答案。"},  
+        {"role": "user", "content": "湖南益阳的天气怎么样？"}  
+]  
+})  
+rprint(resp["messages"][-1].content)
+```
+![[Pasted image 20260702150347.png]]
