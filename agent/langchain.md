@@ -879,7 +879,7 @@ for chunk in customer_service_agent.stream(
 for chunk in customer_service_agent.stream(
         {"messages": [{"role": "user","content": "查询客户ID为 CUST123456 的完整
 信息和可用优惠"
-        stream_mode="tasks"
+        stream_mode="messages"
 ):
     print(chunk)
     print("-" * 50)
