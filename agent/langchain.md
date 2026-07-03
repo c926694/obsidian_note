@@ -1096,6 +1096,7 @@ for item in store.search(("users", ), filter={"sports": "跑步"}):
 ```
 ### 搭配agent
 CustomState定义user_id保证和agent对话能够知道用户id
+runtime是
 ```py
 store = InMemoryStore()  
 class CustomState(AgentState):  
