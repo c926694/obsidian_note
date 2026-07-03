@@ -1005,3 +1005,36 @@ def delete_old_messages(state: AgentState, runtime: Runtime) -> dict | None:
 messages[:to_delete]]}  
     return None
 ```
+## 长期记忆
+长期记忆的存储是 store -> namespace -> key -> value 的四层架构。
+namespace用于区分用户组
+### api
+#### put
+LangGraph底层将数据封装为 Item 对象
+
+```py
+def put(
+    self,
+    namespace: tuple[str, ...],
+    key: str,
+    value: dict[str, Any],
+    index: Literal[False] | list[str] | None = None,
+    *,
+    ttl: float | None | NotProvided = NOT_PROVIDED,
+
+```
+```py
+store.put(
+    ("users", "alice", "memories"), # namespace
+    "pref_food",                    # key
+    {"category": "food", "text": "Alice likes sushi"} # value
+)
+```
+#### get
+Item对象新增了created_at 和updated_at 字段，分别为数据新增和更改时间
+```py
+item = my_store.get(("users", "alice", "memories"), "pref_food")
+if item is not None:
+    print(item.value)
+    # {'category': 'food', 'text': 'Alice likes sushi'}
+```
