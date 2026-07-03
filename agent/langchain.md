@@ -713,6 +713,31 @@ response = agent.invoke({"messages": [...]})
 # 获取最终回答
 final_answer = response['messages'][-1].content
 ```
+### 字段扩充
+将自定义
+```py
+from langgraph.graph import State
+from typing import TypedDict, Annotated
+
+class MyState(TypedDict):
+    messages: list[BaseMessage]
+    user_name: str      # ← 自定义字段
+    todo_list: list     # ← 自定义字段
+
+# 创建 agent 时传入自定义 state
+agent = create_agent(
+    model=model,
+    state_schema=MyState,  # ← 使用你定义的 state
+)
+
+# 现在可以传自定义字段了
+agent.invoke({
+    "messages": [HumanMessage("帮我加一个买牛奶的任务")],
+    "user_name": "张三",
+    "todo_list": [],
+})
+
+```
 ## 绑定工具
 ![[Pasted image 20260702151352.png]]
 ### 内部函数tool
