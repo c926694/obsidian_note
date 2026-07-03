@@ -884,3 +884,108 @@ for chunk in customer_service_agent.stream(
     print(chunk)
     print("-" * 50)
 ```
+# 中间件
+Agent 执行过程中的钩子函数
+钩子是框架或系统在某些关键执行点暴露的扩展接口。
+开发者可以“挂上”自己的逻辑，在那些点上插入、修改或替换行为，而无需改变主流程代码
+# 记忆
+## 短期记忆
+State（会话内部状态） + Checkpointer（持久化机制） + Thread ID（会话作用域）
+State ：默认存储历史消息列表messages ，通过State 管理历史消息Checkpointer ：负责将State 作为检查点持久化保存，检查点是某个时刻的State 快照Thread ID ：用于唯一标识State ，LangChain运行时会按照 thread_id 读写State快照
+langgraph包基于state管理记忆
+每次调用传入config,config中配置thread_id
+thread_id隔离不同的会话空间
+### 基于内存
+✅ 同一进程内有效（不支持跨进程共享）
+
+❌ 程序重启后丢失（或进程重启后丢失）
+
+❌ 不同进程无法共享
+```py
+from langgraph.checkpoint.memory import InMemorySaver
+checkpointer = InMemorySaver()
+# 1. 创建 Agent 时添加 checkpointer
+agent = create_agent(
+    model=model,
+    checkpointer=checkpointer  # 添加内存管理
+)
+# 2. 调用时指定 thread_id
+config = {
+    "configurable": {
+        "thread_id": "1"
+    }
+}
+print("\n第一轮对话：")
+response1 = agent.invoke({
+    "messages": [HumanMessage("我叫张三")]},
+    config=config  # 传入 config
+)
+print(f"Agent: {response1['messages'][-1].content}")
+print("\n第二轮对话：")
+response2 = agent.invoke({
+    "messages": [HumanMessage("我叫什么？")]},
+    config=config  # 使用相同的 thread_id
+)
+print(f"Agent: {response2['messages'][-1].content}")
+第一轮对话：
+Agent: 你好，张三！很高兴认识你。有什么我可以帮你的吗？
+第二轮对话：
+Agent: 你叫张三。
+```
+### 基于pg
+```py
+from langgraph.checkpoint.postgres import PostgresSaver  
+DB_URL ="postgresql://cp:root@127.0.0.1:5431/langchain_db?sslmode=disable"  
+with PostgresSaver.from_conn_string(DB_URL) as checkpointer:  
+    # 初始化PostgreSQL数据库  
+    checkpointer.setup()  
+    agent = create_agent(  
+        model=model,  
+        checkpointer=checkpointer  
+    )  
+    config = {"configurable": {"thread_id": "1"}}  
+    response1 = agent.invoke(  
+        {"messages": [HumanMessage("你好，我是老王")]},  
+        config=config  
+    )  
+    print("=" * 30, "-> 第一次调用 <-", "=" * 30)  
+    for msg in response1["messages"]:  
+        msg.pretty_print()  
+    response2 = agent.invoke(  
+        {"messages": [HumanMessage("你好，我是谁？")]},  
+        config=config  
+    )  
+    print("=" * 30, "-> 第二次调用 <-", "=" * 30)  
+    for msg in response2["messages"]:  
+        msg.pretty_print()
+```
+### 记忆管理
+```py
+@before_model  
+def trim_messages(state: AgentState, runtime: Runtime) -> dict[str, Any] | None:  
+    messages = state["messages"]  
+    if len(messages) <= 3:  
+        return None  
+    first_msg = messages[0]  
+    recent_messages = messages[-3:] if len(messages) % 2 == 0 else messages[-4:]  
+    new_messages = [first_msg] + recent_messages  
+    return {  
+        "messages": [  
+            RemoveMessage(id=REMOVE_ALL_MESSAGES),  
+            *new_messages  
+        ]  
+    }  
+agent = create_agent(  
+    model=model,  
+    middleware=[trim_messages],  
+    checkpointer=InMemorySaver(),  
+)  
+config: RunnableConfig = {"configurable": {"thread_id": "1"}}  
+agent.invoke({"messages": [HumanMessage("你好，我是老王")]}, config)  
+agent.invoke({"messages": [HumanMessage("从现在起，你叫小王")]}, config)  
+agent.invoke({"messages": [HumanMessage("今天天气不错")]}, config)  
+final_response = agent.invoke({"messages": [HumanMessage("告诉我，你是谁？我是                                      谁？"  
+)]}, config)  
+for msg in final_response["messages"]:  
+    msg.pretty_print()
+```
