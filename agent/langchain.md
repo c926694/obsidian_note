@@ -961,6 +961,7 @@ with PostgresSaver.from_conn_string(DB_URL) as checkpointer:
 ```
 ### 记忆管理
 RemoveMessage指定msg.id
+return提交state的修改方案
 #### 消息裁剪
 ```py
 @before_model  
