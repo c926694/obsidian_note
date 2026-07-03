@@ -1140,4 +1140,4 @@ for msg in response2["messages"]:
     msg.pretty_print()
 ```
 # rag
-![[Pasted image 20260703195540.png]]
+![[Pasted image 20260703195540.png|901]]
