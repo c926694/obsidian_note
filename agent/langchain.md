@@ -1038,3 +1038,15 @@ if item is not None:
     print(item.value)
     # {'category': 'food', 'text': 'Alice likes sushi'}
 ```
+#### pgsql
+```py
+from langgraph.store.postgres import PostgresStore  
+namespace = ("users", )  
+user_id = "user-11"  
+username = "小蓝"  
+DB_URL ="postgresql://cp:root@127.0.0.1:5431/langchain_db?sslmode=disable"  
+with PostgresStore.from_conn_string(DB_URL) as store:  
+    store.setup()  
+    store.put(namespace, user_id, {"name": username})  
+    print(store.get(namespace, user_id))
+```
