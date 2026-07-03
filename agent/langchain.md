@@ -1050,3 +1050,22 @@ with PostgresStore.from_conn_string(DB_URL) as store:
     store.put(namespace, user_id, {"name": username})  
     print(store.get(namespace, user_id))
 ```
+#### search
+```py
+def search(
+    self,
+    namespace_prefix: tuple[str, ...],
+    /,
+    *,
+    query: str | None = None,
+    filter: dict[str, Any] | None = None,
+    limit: int = 10,
+    offset: int = 0,
+    refresh_ttl: bool | None = None,
+```
+用于模糊查询
+```py
+print("=" * 30, '-> (users, ), filter=sports <-", "=" * 30)')
+for item in store.search(("users", ), filter={"sports": "跑步"}):
+    print(item)
+```
