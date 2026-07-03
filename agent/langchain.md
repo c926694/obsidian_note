@@ -714,7 +714,7 @@ response = agent.invoke({"messages": [...]})
 final_answer = response['messages'][-1].content
 ```
 ### 字段扩充
-将自定义字段告诉
+将自定义字段告诉agent,然后扩充state的字段
 ```py
 from langgraph.graph import State
 from typing import TypedDict, Annotated
@@ -1093,4 +1093,48 @@ def search(
 print("=" * 30, '-> (users, ), filter=sports <-", "=" * 30)')
 for item in store.search(("users", ), filter={"sports": "跑步"}):
     print(item)
+```
+### 搭配agent
+CustomState定义user_id保证和agent对话能够知道用户id
+```py
+store = InMemoryStore()  
+class CustomState(AgentState):  
+    user_id: NotRequired[str]  
+@tool(parse_docstring=True)  
+def save_user_info(name: str, runtime: ToolRuntime) -> str:  
+    """将用户信息保存在长期记忆中  
+        Args:  
+        name: 用户名  
+  
+    Returns:        str: 保存状态  
+    """    runtime.store.put(("users",), runtime.state["user_id"], {"name": name})  
+    return "saved"  
+@tool(parse_docstring=True)  
+def get_user_info(runtime: ToolRuntime) -> str:  
+    """从长期记忆中读取用户信息  
+  
+    Returns:        str: 用户信息  
+    """    item = runtime.store.get(("users",), runtime.state["user_id"])  
+    return str(item.value) if item else "unknown"  
+agent = create_agent(  
+    model=model,  
+    tools=[save_user_info, get_user_info],  
+    store=store,  
+    system_prompt="用户提及个人信息时及时记录，用户询问个人信息时尝试用工具检索",  
+    state_schema=CustomState,  
+)  
+print("=" * 30, '-> 第一个会话（线程） <-', "=" * 30)  
+response1 = agent.invoke({  
+    "messages": [HumanMessage("你好，很高兴认识你，我是小花")],  
+    "user_id": "user-1"  
+})  
+for msg in response1["messages"]:  
+    msg.pretty_print()  
+print("=" * 30, '-> 第二个会话（线程） <-', "=" * 30)  
+response2 = agent.invoke({  
+    "messages": [HumanMessage("我是谁")],  
+    "user_id": "user-1"  
+})  
+for msg in response2["messages"]:  
+    msg.pretty_print()
 ```
