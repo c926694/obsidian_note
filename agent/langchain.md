@@ -1096,7 +1096,7 @@ for item in store.search(("users", ), filter={"sports": "跑步"}):
 ```
 ### 搭配agent
 CustomState定义user_id保证和agent对话能够知道用户id
-runtime是
+runtime是langgraph的上下文对象,可以获取state、store
 ```py
 store = InMemoryStore()  
 class CustomState(AgentState):  
