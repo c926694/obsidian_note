@@ -1247,4 +1247,17 @@ embeded_docs = embedding_model.embed_documents(texts)
 for i in range(len(texts)):
     print(f"{texts[i]}:{embeded_docs[i][:3]}",end="\n\n")
 ```
-### 
+### 向量数据库
+```py
+from pymilvus import MilvusClient
+# =========================
+# 1. 基本配置
+# =========================
+MILVUS_URI = "http://localhost:19530"  # Milvus 服务的连接地址
+DB_NAME = "rag_tutorial"    # 自定义数据库名称
+COLLECTION_NAME = "docs"    # 向量集合名称（类似于传统数据库的表）
+KNOWLEDGE_FILE = "../knowledge.txt"  # 本地知识库文件路径
+# BGE-M3 在 SiliconFlow / Milvus 文档中都是 1024 维
+EMBED_MODEL_NAME = "Pro/BAAI/bge-m3"   # 嵌入模型名称
+EMBED_DIM = 1024   # BGE-M3 模型输出的向量维度固定为 1024
+```
