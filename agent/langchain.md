@@ -1372,6 +1372,9 @@ stats = client.get_collection_stats(collection_name=COLLECTION_NAME)
 print(stats)
 ```
 ## 检索
+search支持批量查询，因此data传的是向量列表
+因此结果也是批量查询的结果,这里只查了一条，因此返回res[0 ]
+output_fields指定召回时可以返回的字段
 ```py
 # =========================
 # 7. 检索
