@@ -1206,15 +1206,44 @@ for i,chunk in enumerate(paragraphs):
 ```
 ## 向量化
 ```py
-embedding_model=init_embeddings(
+from langchain_community.embeddings import DashScopeEmbeddings
 
-    model=embedding_model_name,
-
-    model_provider="openai",
-
-    api_key=api_key,
-
-    base_url=base_url
-
+embedding_model = DashScopeEmbeddings(
+    model=embedding_model_name,   # 比如 "text-embedding-v2"
+    dashscope_api_key=api_key,
 )
+
+```
+### 句子
+```py
+from main import embedding_model
+
+# 待嵌入的文本句子
+
+text = "What was the name mentioned in the conversation?"
+
+# 生成一个嵌入向量
+
+embedded_query = embedding_model.embed_query(text)
+
+# 使用embedded_query[:5]来查看前5个元素的值
+
+print(embedded_query[:5])
+
+print(len(embedded_query))
+```
+### 文档
+```py
+# 待嵌入的文本列表
+texts = [
+    "Hi there!",
+    "Oh, hello!",
+    "What's your name?",
+    "My friends call me World",
+    "Hello World!"
+]
+# 生成嵌入向量
+embeded_docs = embedding_model.embed_documents(texts)
+for i in range(len(texts)):
+    print(f"{texts[i]}:{embeded_docs[i][:3]}",end="\n\n")
 ```
