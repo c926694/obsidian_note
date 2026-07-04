@@ -1247,3 +1247,4 @@ embeded_docs = embedding_model.embed_documents(texts)
 for i in range(len(texts)):
     print(f"{texts[i]}:{embeded_docs[i][:3]}",end="\n\n")
 ```
+### 
