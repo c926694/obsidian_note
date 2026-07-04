@@ -1141,3 +1141,24 @@ for msg in response2["messages"]:
 ```
 # rag
 ![[Pasted image 20260703195540.png|901]]
+## 文档加载器
+```py
+from langchain_community.document_loaders import TextLoader
+
+loader=TextLoader(file_path="../asset/load/01-langchain-utf-8.txt", encoding="utf-8")
+docs=loader.load()
+
+print(docs)
+
+[Document(metadata={'source': '../asset/load/01-langchain-utf-8.txt'},
+
+page_content='LangChain 是一个用于构建基于大语言模型（LLM）应用的开发框架，旨在帮
+
+助开发者更高效地集成、管理和增强大语言模型的能力，构建端到端的应用程序。它提供了一套模
+
+块化工具和接口，支持从简单的文本生成到复杂的多步骤推理任务'
+```
+document对象的两个属性
+page_content：真正的文档内容，字符串类型。
+
+metadata：文档内容的原数据，字典类型。
