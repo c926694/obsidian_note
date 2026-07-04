@@ -1248,7 +1248,7 @@ for i in range(len(texts)):
     print(f"{texts[i]}:{embeded_docs[i][:3]}",end="\n\n")
 ```
 ### 向量数据库
-**全局配置**
+#### **全局配置**
 
 ```py
 from pymilvus import MilvusClient
@@ -1262,4 +1262,78 @@ KNOWLEDGE_FILE = "../knowledge.txt"  # 本地知识库文件路径
 # BGE-M3 在 SiliconFlow / Milvus 文档中都是 1024 维
 EMBED_MODEL_NAME = "Pro/BAAI/bge-m3"   # 嵌入模型名称
 EMBED_DIM = 1024   # BGE-M3 模型输出的向量维度固定为 1024
+```
+```py
+# =========================
+# 2. 初始化 Milvus
+# =========================
+# 初始化 Milvus 客户端
+client = MilvusClient(MILVUS_URI)
+# 如果指定的数据库不存在，则主动创建
+existing_dbs = client.list_databases()
+if DB_NAME not in existing_dbs:
+    client.create_database(db_name=DB_NAME)
+# 切换到当前工作的数据库
+client.use_database(db_name=DB_NAME)
+```
+```py
+# 如果 collection 已存在，先删掉，防止重复写入冲突
+if client.has_collection(collection_name=COLLECTION_NAME):
+    client.drop_collection(collection_name=COLLECTION_NAME)
+# 创建一个新的向量集合
+# MilvusClient 默认使用简化的 Schema：主键名为 "id" (INT64)，向量字段名为 "vector"
+client.create_collection(
+    collection_name=COLLECTION_NAME,
+    dimension=EMBED_DIM, #Milvus 需要提前在内存中为你开辟正好能容纳 1024 维向量的空
+间
+    metric_type="COSINE"  # 相似度度量标准：余弦相似度（数值越大越相似）
+)
+```
+#### 向量化
+```py
+loader = TextLoader(KNOWLEDGE_FILE, encoding="utf-8")
+
+documents = loader.load()
+
+splitter = RecursiveCharacterTextSplitter(
+
+    chunk_size=220,
+
+    chunk_overlap=80,
+
+    separators=[   # 切分的优先级分隔符
+
+        "\n==============================\n",
+
+        "\n\n",
+
+        "\n",
+
+        "。",
+
+        "，",
+
+        " ",
+
+        ""
+
+    ]
+
+)
+
+# 执行切分，将整篇文档转换成多个小的 Document 对象 (chunks)
+
+chunks = splitter.split_documents(documents)
+
+print(f"共切分出 {len(chunks)} 个 chunk")
+
+# 打印切分结果供调试
+
+print("\n=== 全部切分结果 ===")
+
+for i, chunk in enumerate(chunks):
+
+    print(f"\n--- chunk {i} | len={len(chunk.page_content)} ---")
+
+    print(chunk.page_content)
 ```
