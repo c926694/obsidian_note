@@ -1392,3 +1392,49 @@ def retrieve(question: str, k: int = 5):
     )
     return results[0]  # 返回第一条 query 的搜索结果列表
 ```
+## 召回
+```py
+# =========================
+# 8. 生成
+# =========================
+def generate_answer(question: str):
+    """
+    完整的 RAG 流程：检索相关文档 -> 拼接 Prompt -> LLM 生成回答
+    """
+    # 1. 检索
+    hits = retrieve(question, k=5)
+    # 2. 格式化上下文
+    context_blocks = []
+    print("=== 检索结果 ===")
+    for i, hit in enumerate(hits, 1):
+        text = hit["entity"]["text"]
+        source = hit["entity"].get("source", "unknown")
+        chunk_id = hit["entity"].get("chunk_id", "unknown")
+        score = hit["distance"]  # 在 COSINE 模式下，score 越高代表越相似
+        print(f"[{i}] chunk_id={chunk_id} score={score:.4f} source=
+{source}"
+        print(text)
+        print()
+        # 拼接成带有编号和元数据的规范上下文块
+        context_blocks.append(
+            f"[片段{i} | chunk_id={chunk_id} | source={source}]\n{text}"
+        )
+    # 将多个上下文片段用换行符连成一个大字符串
+    context = "\n\n".join(context_blocks)
+    # 3. 构造 Prompt
+    user_prompt = f"""问题：
+{question}
+上下文：
+{context}
+"""
+    # 4. 调用大模型 Agent 获取结果
+    result = agent.invoke({
+        "messages": [
+            {"role": "user", "content": user_prompt}
+        ]
+    })
+    # 5. 提取并打印最终答案
+    final_msg = result["messages"][-1]
+    print("=== 最终回答 ===")
+    final_msg.pretty_print()
+```
