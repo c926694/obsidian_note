@@ -1164,3 +1164,43 @@ page_content：真正的文档内容，字符串类型。
 metadata：文档内容的原数据，字典类型。
 ## 文档切割器
 文档切分器中较常用的是RecursiveCharacterTextSplitter (递归字符文本切分器) ，遇到特定字符时进行分割。默认情况下，它尝试进行切割的字符包括 ["\n\n", "\n", " ", ""]
+
+chunk_size ：每个切块的最大字符数量，默认值为4000。
+
+chunk_overlap ： 相邻两个切块之间的最大重叠字符数量，默认值为200。为了保证段之间语义完
+
+整，可以设置每个块之间有一部分重叠,相当于添加了小部分上下文
+add_start : 这一段文本在原始文档里的起点位置
+```py
+# 1.导入相关依赖
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+# 2.定义RecursiveCharacterTextSplitter分割器对象
+
+text_splitter = RecursiveCharacterTextSplitter(
+
+    chunk_size=10,
+
+    chunk_overlap=0,
+
+    add_start_index=True,
+
+)
+
+# 3.定义拆分的内容
+
+text="LangChain框架特性\n\n多模型集成(GPT/Claude)\n记忆管理功能\n链式调用设计。文档分析场景示例：需要处理PDF/Word等格式。"
+
+# 4.拆分器分割
+
+paragraphs = text_splitter.split_text(text)
+
+for i,chunk in enumerate(paragraphs):
+
+    print(f"块{i + 1},长度：{len(chunk)}")
+
+    print(chunk)
+
+    print('-' * 50)
+```
