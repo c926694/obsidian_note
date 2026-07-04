@@ -1204,3 +1204,17 @@ for i,chunk in enumerate(paragraphs):
 
     print('-' * 50)
 ```
+## 向量化
+```py
+embedding_model=init_embeddings(
+
+    model=embedding_model_name,
+
+    model_provider="openai",
+
+    api_key=api_key,
+
+    base_url=base_url
+
+)
+```
