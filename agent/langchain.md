@@ -1371,3 +1371,24 @@ client.flush(collection_name=COLLECTION_NAME)
 stats = client.get_collection_stats(collection_name=COLLECTION_NAME)
 print(stats)
 ```
+## 检索
+```py
+# =========================
+# 7. 检索
+# =========================
+def retrieve(question: str, k: int = 5):
+    """
+    输入用户问题，通过向量相似度从 Milvus 召回最相关的 K 个文本片段
+    """
+    # 将用户的提问转换为向量（单条查询使用 embed_query）
+    query_vector = embed_model.embed_query(question)
+    # 在 Milvus 中执行向量搜索：查数据（search）
+    results = client.search(
+        collection_name=COLLECTION_NAME,
+        data=[query_vector],  # 向量数据库搜索接口接收一个列表
+        limit=k,              # 返回最相似的前 K 条记录
+        output_fields=["text", "source", "chunk_id"] # 指定召回时一并返回的标量
+字段
+    )
+    return results[0]  # 返回第一条 query 的搜索结果列表
+```
