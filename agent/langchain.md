@@ -1162,3 +1162,5 @@ document对象的两个属性
 page_content：真正的文档内容，字符串类型。
 
 metadata：文档内容的原数据，字典类型。
+## 文档切割器
+文档切分器中较常用的是RecursiveCharacterTextSplitter (递归字符文本切分器) ，遇到特定字符时进行分割。默认情况下，它尝试进行切割的字符包括 ["\n\n", "\n", " ", ""]
