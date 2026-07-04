@@ -1337,3 +1337,37 @@ for i, chunk in enumerate(chunks):
 
     print(chunk.page_content)
 ```
+```py
+# =========================
+# 5. 生成向量并写入 Milvus
+# =========================
+# 批量将所有文本块的内容（page_content）转换为稠密向量
+# init_embeddings:
+# - 批量文档 -> embed_documents
+# - 单条查询 -> embed_query
+vectors = embed_model.embed_documents([chunk.page_content for chunk in
+chunks])
+# 构建复合 Milvus 简易模式的数据行格式
+data = [
+    {
+        "id": i,    # 主键 ID
+        "vector": vectors[i],  # 对应的特征向量
+        "text": chunks[i].page_content,  # 原始文本内容（召回时用来做上下文）
+        "source": KNOWLEDGE_FILE,  # 元数据：来源文件
+        "chunk_id": i,  # 元数据：切块序号
+    }
+    # 修正原代码逻辑漏洞：原代码写死了 len(chunks)，若有变动可能越界，这里动态绑定
+    for i in range(len(chunks))
+]
+# 将数据插入或更新到向量集合中：写数据（upsert）
+insert_res = client.upsert(
+    collection_name=COLLECTION_NAME,
+    data=data
+)
+print("insert result:", insert_res)
+# 强制刷新数据落盘，确保能立刻被检索到
+client.flush(collection_name=COLLECTION_NAME)
+# 打印当前集合的统计信息（如行数）
+stats = client.get_collection_stats(collection_name=COLLECTION_NAME)
+print(stats)
+```
