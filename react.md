@@ -4,7 +4,7 @@ react的组件就是一个jsx文件，可以写html和js
 是一个函数
 这个函数需要return ()
 - react返回的内容只能由一个根元素
-多级元素用空元素包裹
+多级根元素用空元素包裹
 ```
 <>
 
@@ -120,7 +120,8 @@ function App() {
 ## useState
 [data,setData]=useState()
 useState返回响应式数据data
-data的修改需要ton
+data的修改需要通过setData函数来实现
+setData传入的结果就修改data后的值
 ```jsx
 function App() {
 
