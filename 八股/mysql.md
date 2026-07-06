@@ -196,11 +196,12 @@ EXPLAIN SELECT name FROM user;
 ```
 #### extra（额外信息）
 
-| extra | 含义 | 要避免？ |
-|---|---|---|
-| `Using filesort` | 无法用索引排序，额外文件排序 | ❌ 避免 |
-| `Using temporary` | 用了临时表（常见于 group by / order by） | ❌ 避免 |
-| `Using index` | **覆盖索引**，不回表 | ✅ 争取 |
+| extra             | 含义                             | 效率    |
+| ----------------- | ------------------------------ | ----- |
+| `Using index`     | **覆盖索引**，不回表                   | ✅✅ 最好 |
+| `NULL`            | 用索引定位+回表读数据，无特殊信息                 | ✅ 正常 |
+| `Using filesort`  | 无法用索引排序，额外文件排序                 | ❌ 避免  |
+| `Using temporary` | 用了临时表（常见于 group by / order by） | ❌ 避免  |
 
 ### select调优
 
