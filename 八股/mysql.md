@@ -196,6 +196,8 @@ EXPLAIN SELECT name FROM user;
 ```
 #### extra（额外信息）
 
+filesort和temporary的解决办法就是给对应
+
 | extra             | 含义                             | 效率    |
 | ----------------- | ------------------------------ | ----- |
 | `Using index`     | **覆盖索引**，不回表                   | ✅✅ 最好 |
