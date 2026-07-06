@@ -59,6 +59,11 @@ function App() {
 }
 ```
 ## 循环
+.map进行循环
+jsx只允许一个根元素,这在列表循环中写的jsx语法也是生效的
+于是可以用<></>包裹多级根元素
+但是在指定key的情况下用Fragement标签
+可以将fragement标签理解为带css的空标签
 ```js
 function App() {
 
@@ -87,6 +92,26 @@ function App() {
       {listContent}
 
     </div>
+
+  )
+
+}
+```
+## 事件
+```js
+function handlerClick(e) {
+
+  console.log('点击了');
+
+}
+
+  
+
+function App() {
+
+  return (
+
+    <button onClick={handlerClick}>点击我</button>
 
   )
 
