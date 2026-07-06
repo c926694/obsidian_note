@@ -1248,7 +1248,8 @@ for i in range(len(texts)):
     print(f"{texts[i]}:{embeded_docs[i][:3]}",end="\n\n")
 ```
 ### 向量数据库
-#### **全局配置**
+集合相当于表,以集合为单位进行crud
+#### **全局配置**+
 
 ```py
 from pymilvus import MilvusClient
