@@ -189,7 +189,11 @@ ON table_name(column_name(length));
 | `range` | 索引范围扫描（`<` `>` `in` `between`） | 尽量达到这级及以上 |
 | `index` | 全索引扫描 | 遍历索引树 |
 | `ALL` | 全表扫描 | 最差，要避免 |
-
+index:
+```sql
+-- 只要 name，没有筛选条件
+EXPLAIN SELECT name FROM user;
+```
 #### extra（额外信息）
 
 | extra | 含义 | 要避免？ |
