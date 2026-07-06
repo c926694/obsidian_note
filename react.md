@@ -117,3 +117,52 @@ function App() {
 
 }
 ```
+## useState
+[data,setData]=useState()
+useState返回响应式数据data
+data的修改需要ton
+```jsx
+function App() {
+
+  const [data, setData] = useState([
+
+    { id: 1, name: "John" },
+
+    { id: 2, name: "Jane" },
+
+    { id: 3, name: "Bob" },
+
+  ]);
+
+  function fn(e) {
+
+    setData([...data, { id: data.length + 1, name: "New Person" }]);
+
+  }
+
+  
+
+  const listData = data.map((item) => (
+
+    <div key={item.id}>
+
+      <h2>{item.name}</h2>
+
+    </div>
+
+  ));
+
+  return (
+
+    <>
+
+      <div>{listData}</div>
+
+      <button onClick={fn}>按钮</button>
+
+    </>
+
+  );
+
+}
+```
