@@ -426,6 +426,16 @@ add_conditional_edges("classify", route_order, {
 
 ```
 ## Send
+用于将多个任务分配给同一节点并行处理
+
+| 概念 | 说明 |
+|------|------|
+| `Send(节点名, state)` | 派一个任务去指定节点，带一份独立的 state |
+| 返回类型 | `list[Send]` — 每有一个 Send 就启动一个并行任务 |
+| 条件边配合 | `add_conditional_edges(源, 函数, [目标节点])` |
+| 归约器 | 并行任务写同一个字段时**必须**加 `operator.add`，否则覆盖 |
+| 用途 | 动态数量并行：处理多个文档、搜索多个来源、评估多个选项 |
+
 
 ```py
 from langgraph.graph import StateGraph, START, END, Send
