@@ -401,3 +401,19 @@ print(new_config)
 
 graph.invoke(None, new_config)
 ```
+# edge
+```py
+# 路由函数
+def should_continue(state) -> Literal["tool_node", END]:
+    if last_message.tool_calls:
+        return "tool_node"    # ← 返回字符串
+    return END                # ← 返回字符串
+
+# 条件边
+add_conditional_edges(
+    "llm_call",
+    should_continue,
+    ["tool_node", END]        # ← 允许的返回值列表
+)
+
+```
