@@ -374,3 +374,13 @@ display(Image(workflow.get_graph().draw_mermaid_png()))
 state = workflow.invoke({"topic": "编程"})
 print(state["joke"])
 ```
+# 状态回溯
+```py
+# 状态以倒序时间顺序返回。
+states = list(graph.get_state_history(config))
+
+for state in states:
+    print(state.next)
+    print(state.config["configurable"]["checkpoint_id"])
+    print()
+```
