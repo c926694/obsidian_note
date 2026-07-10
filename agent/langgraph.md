@@ -425,3 +425,39 @@ add_conditional_edges("classify", route_order, {
 })
 
 ```
+## Send
+```py
+from langgraph.graph import StateGraph, START, END, Send
+from typing import Annotated, TypedDict
+import operator
+
+class State(TypedDict):
+    tasks: list[str]
+    results: Annotated[list[str], operator.add]
+
+def dispatcher(state: State):
+    """根据 tasks 列表，每个 task 派一个 worker"""
+    return [
+        Send("worker", {"task": t})    # ← 参数1: 目标节点名
+        for t in state["tasks"]        #   参数2: 传给该节点的 state
+    ]
+
+def worker(state):
+    """每个 worker 只处理自己的 task"""
+    result = f"完成: {state['task']}"
+    return {"results": [result]}
+
+builder = StateGraph(State)
+builder.add_node(dispatcher)
+builder.add_node(worker)
+builder.add_edge(START, "dispatcher")
+builder.add_conditional_edges("dispatcher", dispatcher, ["worker"])
+builder.add_edge("worker", END)
+
+graph = builder.compile()
+
+res = graph.invoke({"tasks": ["买菜", "做饭", "洗碗"], "results": []})
+print(res["results"])
+# → ['完成: 买菜', '完成: 做饭', '完成: 洗碗']
+
+```
