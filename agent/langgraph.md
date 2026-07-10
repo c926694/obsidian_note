@@ -375,6 +375,7 @@ state = workflow.invoke({"topic": "编程"})
 print(state["joke"])
 ```
 # 状态回溯
+## 获取节点列表
 ```py
 # 状态以倒序时间顺序返回。
 states = list(graph.get_state_history(config))
@@ -384,3 +385,4 @@ for state in states:
     print(state.config["configurable"]["checkpoint_id"])
     print()
 ```
+## 获取节点
