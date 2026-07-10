@@ -74,3 +74,13 @@ tools_by_name = {tool.name: tool for tool in tools}
 model_with_tools = model.bind_tools(tools)
 ```
 ## 状态
+```py
+from langchain.messages import AnyMessage  
+from typing_extensions import TypedDict, Annotated  
+import operator  
+  
+  
+class MessagesState(TypedDict):  
+    messages: Annotated[list[AnyMessage], operator.add]  
+    llm_calls: int
+```
