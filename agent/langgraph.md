@@ -386,3 +386,9 @@ for state in states:
     print()
 ```
 ## 获取节点
+```py
+# 这是倒数第二个状态（状态按时间顺序列出）
+selected_state = states[1]
+print(selected_state.next)
+print(selected_state.values)
+```
