@@ -403,7 +403,7 @@ graph.invoke(None, new_config)
 ```
 # edge
 ## 条件边
-条件函数返回的字符串用作条件
+条件函数返回的字符串用作条件跳转的字典key
 ```py
 from typing import Literal
 
