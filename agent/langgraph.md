@@ -392,3 +392,11 @@ selected_state = states[1]
 print(selected_state.next)
 print(selected_state.values)
 ```
+## 更新状态
+```py
+@[`update_state`]将创建一个新的检查点。新检查点将与同一线程关联，但会有一个新的检查点ID。
+
+```python
+new_config = graph.update_state(selected_state.config, values={"topic": "chickens"})
+print(new_config)
+```
