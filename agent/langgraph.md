@@ -18,3 +18,8 @@ graph = graph.compile()
 res=graph.invoke({"messages": [{"role": "user", "content": "hi!"}]})  
 print(res["messages"][-1].content)
 ```
+# 快速开始
+## 模型和工具定义
+```py
+
+```
