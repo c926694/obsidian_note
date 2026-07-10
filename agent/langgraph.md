@@ -250,18 +250,21 @@ print("批准:", res)
 # → 批准: {'items': ['咖啡'], 'approved': True, 'msg': '已处理'}
 ```
 
-## 运行时顺序
+## 中断流程
 
-| 步骤 | 代码 | 说明 |
-|------|------|------|
-| 1 | `graph.invoke(...)` | 从 START 开始跑 |
-| 2 | `add_item` | 添加商品，`items: ["咖啡"]` |
-| 3 | `ask_approve` | 遇到 `interrupt("提示语")` → **停住** |
-| 4 | 第1次 invoke 返回 | 返回 `{'items': ['咖啡'], ...}`（卡住前的 state） |
-| 5 | 你(外部) | 决定 approve=True 还是 False |
-| 6 | `graph.invoke(Command(resume=...))` | 从断点继续跑 |
-| 7 | `interrupt()` 返回你的值 | `answer = True/False` |
-| 8 | `ask_approve`、`process` 跑完 | 返回最终结果 |
+> **第1次 `invoke` → 跑到 `interrupt` 图终止 → 第2次 `invoke(Command(resume=值))` → `interrupt()` 返回那个值 → 节点拿到值继续执行。**
+
+```
+第1次 invoke ──→ ... → interrupt("提示语")
+                                │
+                           图终止，返回中间态
+                                │
+                     你决定 resume=True / False
+                                │
+第2次 invoke(Command(resume=X)) ──→ interrupt() 返回 X
+                                │
+                      answer = X → 继续往下跑 → END
+```
 
 ## Command.resume 传给 interrupt
 
