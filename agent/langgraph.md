@@ -73,3 +73,4 @@ tools = [add, multiply, divide]
 tools_by_name = {tool.name: tool for tool in tools}  
 model_with_tools = model.bind_tools(tools)
 ```
+## 状态
