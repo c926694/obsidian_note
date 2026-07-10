@@ -375,6 +375,7 @@ state = workflow.invoke({"topic": "编程"})
 print(state["joke"])
 ```
 # 状态回溯
+**不改图的结构，只改 State 的数据**
 ## 获取节点列表
 ```py
 # 状态以倒序时间顺序返回。
