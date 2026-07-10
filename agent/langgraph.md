@@ -173,6 +173,114 @@ for m in messages["messages"]:
     m.pretty_print()
 ```
 ![[Pasted image 20260710103443.png]]
+# 中断 (Interrupt)
+
+interrupt 让图执行到某个节点时暂停，等外部回复后再继续。
+
+## 必须条件
+
+- 必须有 `checkpointer`（记忆检查点）
+- 必须有 `thread_id`（标识同一会话，续跑时用同一个）
+
+```py
+checkpointer = InMemorySaver()
+graph = builder.compile(checkpointer=checkpointer)
+
+config = {"configurable": {"thread_id": "order-1"}}
+```
+
+## 最简单的例子
+
+```py
+from typing_extensions import TypedDict
+from langgraph.graph import StateGraph, START, END
+from langgraph.types import interrupt, Command
+from langgraph.checkpoint.memory import InMemorySaver
+
+class State(TypedDict):
+    items: list[str]
+    approved: bool
+    msg: str
+
+def add_item(state: State):
+    return {"items": ["咖啡"]}
+
+def ask_approve(state: State):
+    # ★ 这里停住，等外面给答案
+    answer = interrupt("订单有咖啡，是否批准？")
+    return {"approved": answer}     # interrupt("") 返回的就是外部传的值
+
+def process(state: State):
+    if state["approved"]:
+        return {"msg": "已处理"}
+    return {"msg": "已取消"}
+
+# 构建图
+builder = StateGraph(State)
+builder.add_node(add_item)
+builder.add_node(ask_approve)
+builder.add_node(process)
+builder.add_edge(START, "add_item")
+builder.add_edge("add_item", "ask_approve")
+builder.add_edge("ask_approve", "process")
+builder.add_edge("process", END)
+
+checkpointer = InMemorySaver()
+graph = builder.compile(checkpointer=checkpointer)
+
+# ===== 运行 =====
+config = {"configurable": {"thread_id": "order-1"}}
+
+# 第1次 invoke：跑到 interrupt 停住，返回暂停前的 state
+res1 = graph.invoke({"items": [], "approved": False, "msg": ""}, config)
+print("第1次返回:", res1)
+# → 第1次返回: {'items': ['咖啡'], 'approved': False, 'msg': ''}
+#   add_item 跑完了，ask_approve 还没跑（interrupt停住了）
+
+# 第2次 invoke：传 False（拒绝），从断点继续跑完
+res2 = graph.invoke(Command(resume=False), config)
+print("第2次返回:", res2)
+# → 第2次返回: {'items': ['咖啡'], 'approved': False, 'msg': '已取消'}
+
+# ===== 另一个会话：批准 =====
+config2 = {"configurable": {"thread_id": "order-2"}}
+graph.invoke({"items": [], "approved": False, "msg": ""}, config2)
+res = graph.invoke(Command(resume=True), config2)
+print("批准:", res)
+# → 批准: {'items': ['咖啡'], 'approved': True, 'msg': '已处理'}
+```
+
+## 运行时顺序
+
+| 步骤 | 代码 | 说明 |
+|------|------|------|
+| 1 | `graph.invoke(...)` | 从 START 开始跑 |
+| 2 | `add_item` | 添加商品，`items: ["咖啡"]` |
+| 3 | `ask_approve` | 遇到 `interrupt("提示语")` → **停住** |
+| 4 | 第1次 invoke 返回 | 返回 `{'items': ['咖啡'], ...}`（卡住前的 state） |
+| 5 | 你(外部) | 决定 approve=True 还是 False |
+| 6 | `graph.invoke(Command(resume=...))` | 从断点继续跑 |
+| 7 | `interrupt()` 返回你的值 | `answer = True/False` |
+| 8 | `ask_approve`、`process` 跑完 | 返回最终结果 |
+
+## Command.resume 传给 interrupt
+
+```python
+# 图里
+answer = interrupt("订单有咖啡，是否批准？")
+#           ↑
+#           ↓
+# 外部
+graph.invoke(Command(resume=True), config)
+#              ↑ True 传给 interrupt，interrupt 返回 True
+#              所以 answer = True
+```
+
+| 外部传 | `interrupt()` 返回 | `approved` | 最终结果 |
+|--------|-------------------|-----------|---------|
+| `Command(resume=True)` | `True` | `True` | 已处理 |
+| `Command(resume=False)` | `False` | `False` | 已取消 |
+
 # 工作流
 ```py
 from typing import Annotated
