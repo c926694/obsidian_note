@@ -403,7 +403,7 @@ graph.invoke(None, new_config)
 ```
 # edge
 ## 条件边
-
+条件函数返回的字符串用zuo
 ```py
 from typing import Literal
 
