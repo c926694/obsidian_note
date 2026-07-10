@@ -402,18 +402,26 @@ print(new_config)
 graph.invoke(None, new_config)
 ```
 # edge
-```py
-# 路由函数
-def should_continue(state) -> Literal["tool_node", END]:
-    if last_message.tool_calls:
-        return "tool_node"    # ← 返回字符串
-    return END                # ← 返回字符串
+## 条件边
 
-# 条件边
-add_conditional_edges(
-    "llm_call",
-    should_continue,
-    ["tool_node", END]        # ← 允许的返回值列表
-)
+```py
+from typing import Literal
+
+def route_order(state) -> Literal["urgent", "normal", "vip"]:
+    """
+    根据订单类型路由到不同节点
+    返回值用语义化的名字，不用和节点名一致
+    """
+    if state["is_vip"]:
+        return "vip"        # 语义化返回值
+    if state["is_urgent"]:
+        return "urgent"
+    return "normal"         # 普通订单
+
+add_conditional_edges("classify", route_order, {
+    "vip": "vip_handler",      # "vip" → 去 vip_handler 节点
+    "urgent": "fast_track",     # "urgent" → 去 fast_track 节点
+    "normal": "standard_queue"  # "normal" → 去 standard_queue 节点
+})
 
 ```
