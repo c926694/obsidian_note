@@ -472,3 +472,142 @@ print(res["results"])
 # → ['完成: 买菜', '完成: 做饭', '完成: 洗碗']
 
 ```
+
+# 子图 
+
+## 父图与子图共享 State 的消息重复问题
+子图返回的是完整 state（含继承来的消息），父图又用 `operator.add` 追加了一次
+
+当父图和子图使用**同一个带 `operator.add` 的 State**时，消息会重复
+1. 父图 invoke → 父图 state: ["hello subgraph"]
+2. 父图把完整 state 传给子图 → 子图收到: ["hello subgraph"]
+3. 子图 sub_node_1 返回 ["response from subgraph"]
+   子图内部 operator.add → ["hello subgraph"] + ["response from subgraph"]
+   子图返回: ["hello subgraph", "response from subgraph"]
+4. 父图用 operator.add 合并子图返回值:
+   ["hello subgraph"] + ["hello subgraph", "response from subgraph"]
+   = ["hello subgraph", "hello subgraph", "response from subgraph"]
+
+```py
+from operator import add
+from typing import TypedDict, Annotated
+from langgraph.graph import StateGraph, START, END
+
+class State(TypedDict):
+    messages: Annotated[list[str], add]
+
+# 子图
+def sub_node_1(state: State):
+    return {"messages": ["response from subgraph"]}
+
+subgraph_builder = StateGraph(State)
+subgraph_builder.add_node("sub_node_1", sub_node_1)
+subgraph_builder.add_edge(START, "sub_node_1")
+subgraph_builder.add_edge("sub_node_1", END)
+subgraph = subgraph_builder.compile()
+
+# 父图
+builder = StateGraph(State)
+builder.add_node("subgraph_node", subgraph)
+builder.add_edge(START, "subgraph_node")
+builder.add_edge("subgraph_node", END)
+graph = builder.compile()
+
+print(graph.invoke({"messages": ["hello subgraph"]}))
+# → {'messages': ['hello subgraph', 'hello subgraph', 'response from subgraph']}
+#   "hello subgraph" 重复了！
+```
+
+
+## 解决方案：父图和子图用不同的 State
+
+```py
+# 父图 State
+class ParentState(TypedDict):
+    messages: Annotated[list[str], add]
+
+# 子图 State — 不加归约器，覆盖而非追加
+class SubState(TypedDict):
+    messages: list[str]
+
+def sub_node_1(state: SubState):
+    return {"messages": ["response from subgraph"]}
+
+subgraph_builder = StateGraph(SubState)
+subgraph_builder.add_node("sub_node_1", sub_node_1)
+subgraph_builder.add_edge(START, "sub_node_1")
+subgraph_builder.add_edge("sub_node_1", END)
+subgraph = subgraph_builder.compile()
+
+builder = StateGraph(ParentState)
+builder.add_node("subgraph_node", subgraph)
+builder.add_edge(START, "subgraph_node")
+builder.add_edge("subgraph_node", END)
+graph = builder.compile()
+
+print(graph.invoke({"messages": ["hello subgraph"]}))
+# → {'messages': ['hello subgraph', 'response from subgraph']}  ✅ 不重复
+```
+# Command
+
+`Command` 是 LangGraph 的**指令对象**，用于在节点内或外部控制图的行为。
+
+| 用法 | 说明 | 位置 |
+|------|------|------|
+| `Command(resume=值)` | 从中断恢复，传给 `interrupt()` | 外部调用 |
+| `Command(goto=节点名, update=字典)` | 节点内直接指定下一步 + 更新 state | 节点内部 |
+| `Command(update=字典)` | 只更新 state，不改变走向 | 节点内部 |
+
+## resume — 恢复中断
+
+## goto + update — 节点内控制走向
+简化只更新state的节点
+
+通常节点**只返回 state 更新**，靠边决定下一步。用 `Command(goto=...)` 可以在节点内直接指定下一步：
+
+```python
+def node_call_llm(state):
+    result = model.invoke(state["messages"])
+
+    if result.tool_calls:
+        # 节点自己决定下一步去哪
+        return Command(
+            goto="tool_node",              # ← 直接指定去 tool_node
+            update={"messages": [result]}   # ← 同时更新 state
+        )
+    return Command(
+        goto=END,                          # ← 直接结束
+        update={"messages": [result]}
+    )
+
+# 编译时
+builder.add_node("llm_call", node_call_llm)
+builder.add_edge(START, "llm_call")
+# 不需要 add_conditional_edges，节点自己用 Command 控制走向
+```
+
+## goto 的作用
+
+`Command(goto=节点名)` 相当于**路由函数 + 条件边**的合并版，把判断逻辑写在节点里：
+
+```python
+# 写法A：条件边（你原来的）
+def should_continue(state):
+    if last.tool_calls: return "tool_node"
+    return END
+
+# 写法B：Command（节点自己决定）
+def llm_call(state):
+    result = model.invoke(...)
+    if result.tool_calls:
+        return Command(goto="tool_node", update={"messages": [result]})
+    return Command(goto=END, update={"messages": [result]})
+```
+
+## Command(goto) 注意事项
+
+```python
+# ✅ 用 Command(goto=...) 时，不需要 add_conditional_edges
+# ❌ 不能既用 Command(goto) 又用 add_conditional_edges
+# ✅ 用 Command(goto) 的节点只需要 add_edge(START, "节点") 即可
+```
