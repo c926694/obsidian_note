@@ -121,7 +121,7 @@ function App() {
 [data,setData]=useState()
 useState返回响应式数据data
 data的修改需要通过setData函数来实现
-setData传入的结果就修改data后的值
+setData传入的结果就是修改data后的值
 ```jsx
 function App() {
 
