@@ -525,17 +525,23 @@ func callExternalAPI(ctx context.Context) (string, error) {
 `WithTimeout` 底层就是 `WithDeadline`，两者等价：
 
 ```go
-deadline := time.Now().Add(2 * time.Second)
-ctx, cancel := context.WithDeadline(context.Background(), deadline)
-defer cancel()
-```
-
-```go
-// WithTimeout 内部实现
+// WithTimeout 是个壳，内部直接调 WithDeadline
 func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc) {
     return WithDeadline(parent, time.Now().Add(timeout))
 }
+
+// 所以以下两种写法完全等价：
+ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
+ctx2, cancel2 := context.WithDeadline(ctx, time.Now().Add(2*time.Second))
 ```
+
+区别在于参数含义：
+
+| | WithTimeout | WithDeadline |
+|---|---|---|
+| 参数 | **相对时间**（duration） | **绝对时间**（time.Time） |
+| 通俗理解 | "超过 2 秒就取消" | "3 点之前必须完成" |
+| 典型场景 | 接口超时控制（95% 的场景） | 继承上游 deadline（如 HTTP `r.Context()`） |
 
 ## WithValue — 传递请求级数据
 
