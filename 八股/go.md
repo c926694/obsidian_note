@@ -384,7 +384,6 @@ Context的取消是通过channel关闭信号实现的，主要有三种取消方
 其次是**超时取消**，`context.WithTimeout`和`context.WithDeadline`会启动一个定时器，到达指定时间后自动调用cancel函数触发取消。
 
 最后是**级联取消**，当父Context被取消时，所有子Context会自动被取消，这是通过Context树的结构实现的。
-
 # gmp模型
 
 ## gmp是啥?

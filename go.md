@@ -448,36 +448,178 @@ date:="2006.11.23"
 
 # Context
 
-## 存储上下文信息
+## 根 Context
 
-Value函数存储信息并返回子context
+所有 Context 的起点，永远不会被取消：
 
-```Go
-func store(ctx context.Context,userId int64) context.Context {
-    return context.WithValue(ctx,"userId",userId)
+```go
+ctx := context.Background()   // 最常用，main 函数、初始化、顶层请求入口
+ctx := context.TODO()         // 不确定用什么时占位，和 Background 一样
+```
+
+## WithCancel — 主动取消
+
+`cancel()` 关闭 `ctx.Done()` 的 channel，所有监听方同时收到信号：
+
+```go
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+
+    go worker(ctx, "worker-1")
+    go worker(ctx, "worker-2")
+
+    time.Sleep(2 * time.Second)
+    cancel()                    // 通知所有 worker 停止
+    time.Sleep(500 * time.Millisecond)
 }
+
+func worker(ctx context.Context, name string) {
+    for {
+        select {
+        case <-ctx.Done():     // 收到取消信号
+            fmt.Printf("%s: 收到退出信号，原因: %v\n", name, ctx.Err())
+            return
+        default:
+            fmt.Printf("%s: 工作中...\n", name)
+            time.Sleep(500 * time.Millisecond)
+        }
+    }
+}
+```
+
+## WithTimeout — 超时控制
+
+到时间自动 cancel，**defer cancel() 必须写**，防止定时器泄漏：
+
+```go
+func main() {
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+    defer cancel()
+
+    result, err := callExternalAPI(ctx)
+    if err != nil {
+        fmt.Println("调用失败:", err)
+        return
+    }
+    fmt.Println("结果:", result)
+}
+
+func callExternalAPI(ctx context.Context) (string, error) {
+    ch := make(chan string, 1)
+    go func() {
+        time.Sleep(3 * time.Second)  // 模拟慢调用
+        ch <- "ok"
+    }()
+
+    select {
+    case res := <-ch:
+        return res, nil
+    case <-ctx.Done():
+        return "", ctx.Err()  // context deadline exceeded
+    }
+}
+```
+
+## WithDeadline — 绝对时间截止
+
+`WithTimeout` 底层就是 `WithDeadline`，两者等价：
+
+```go
+deadline := time.Now().Add(2 * time.Second)
+ctx, cancel := context.WithDeadline(context.Background(), deadline)
+defer cancel()
+```
+
+```go
+// WithTimeout 内部实现
+func WithTimeout(parent Context, timeout time.Duration) (Context, CancelFunc) {
+    return WithDeadline(parent, time.Now().Add(timeout))
+}
+```
+
+## WithValue — 传递请求级数据
+
+key 用自定义类型防止不同包冲突：
+
+```go
+type ctxKey string
+
+const (
+    traceIDKey ctxKey = "trace_id"
+    userIDKey  ctxKey = "user_id"
+)
 
 func main() {
-    c := store(context.Background(),1)
-    fmt.Println(c.Value("userId"))
+    ctx := context.WithValue(context.Background(), traceIDKey, "req-12345")
+    ctx = context.WithValue(ctx, userIDKey, "user-999")
+    handleRequest(ctx)
+}
+
+func handleRequest(ctx context.Context) {
+    traceID := ctx.Value(traceIDKey).(string)
+    userID := ctx.Value(userIDKey).(string)
+    fmt.Printf("处理请求: trace=%s, user=%s\n", traceID, userID)
+    queryDatabase(ctx)
+}
+
+func queryDatabase(ctx context.Context) {
+    traceID := ctx.Value(traceIDKey).(string)
+    fmt.Printf("查询数据库: trace=%s\n", traceID)
+
+    // 同时监听取消
+    select {
+    case <-time.After(100 * time.Millisecond):
+        fmt.Println("查询完成")
+    case <-ctx.Done():
+        fmt.Println("查询被取消:", ctx.Err())
+    }
 }
 ```
 
-## 定时任务监控
+## 级联取消
 
-Done函数返回一个只读通道
+父 cancel → 所有子自动 cancel，不需要逐个调用：
 
-超时自动cancel释放资源,没超时手动defer释放资源
+```go
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
 
-<- ctx.Done()阻塞等待channel就绪
+    go func() {
+        ctx2, _ := context.WithCancel(ctx)
+        go levelWorker(ctx2, "level-1")
+    }()
+    go func() {
+        ctx3, _ := context.WithTimeout(ctx, 5*time.Second)
+        go levelWorker(ctx3, "level-2")
+    }()
 
-```Go
-ctx,cancel:=context.WithTimeout(context.Background(),2*time.Second)
-    defer cancel()
-    select {
-    case <-ctx.Done():
-        fmt.Print(ctx.Err())
-    default:
-        fmt.Println("默认")
-    }
+    time.Sleep(1 * time.Second)
+    cancel()
+    time.Sleep(100 * time.Millisecond)
+}
+
+func levelWorker(ctx context.Context, name string) {
+    <-ctx.Done()
+    fmt.Printf("%s 收到取消: %v\n", name, ctx.Err())
+}
 ```
+
+## 与标准库集成
+
+```go
+req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.example.com", nil)
+rows, err := db.QueryContext(ctx, "SELECT * FROM users")
+```
+
+官方库几乎都支持 Context：`net/http`、`database/sql`、`os/exec` 等。
+
+## 最佳实践
+
+| 规则 | 原因 |
+|------|------|
+| ctx 作为函数**第一个参数**，命名 `ctx` | Go 社区约定，golint 强制 |
+| **不要**把 ctx 存在 struct 里 | ctx 是请求范围的，不是对象属性 |
+| **不要**把 nil 当 ctx 传 | 用 `context.TODO()` 代替 |
+| **务必 defer cancel()** | 泄漏定时器/goroutine |
+| value 只放**元数据**，不放**业务参数** | 职责分离 |
+| 自定义 key 类型**避免 key 冲突** | 不同包可能用同名 key |
