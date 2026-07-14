@@ -358,9 +358,6 @@ type Once struct {
 ## context是啥
 
 go语言里的context实际上是一个接口，提供了**Deadline()，Done()，Err()以及Value()四种方法**。它在Go 1.7 标准库被引入。
-
-它本质上是一个**信号传递**和**范围控制**的工具。它的核心作用是在一个**请求处理链路中**（跨越多个函数和goroutine），优雅地传递**取消信号**（cancellation）、**超时**（timeout）和**截止日期**（deadline），并能**携带一些范围内的键值对数据**。
-
 ## context作用
 
 Go的Context主要解决三个核心问题：**超时控制**、**取消信号传播**和**请求级数据传递**
