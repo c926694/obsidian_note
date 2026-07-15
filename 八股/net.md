@@ -4,9 +4,5 @@
 TCP 三次握手后 → TLS 四轮握手
 ```
 
-1. **ClientHello**：客户端发支持的 TLS 版本、加密套件、客户端随机数
-2. **ServerHello**：服务器选定版本和套件，发服务器随机数 + 数字证书
-3. **客户端验证证书**（用系统内置 CA 公钥验签），取出服务器公钥，加密一个 pre-master 随机数发过去，同时通知"后面要加密了"
-4. **服务器用私钥解密**拿到 pre-master，双方都有了三个随机数 → 各自算出会话密钥，互相确认握手完成
-
-之后都用这个会话密钥加密 HTTP 通信。
+1. client发送clientHello到server,包括TLS版本、加密算法、client随机数
+2. server接收clientHello,发送
