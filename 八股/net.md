@@ -9,3 +9,4 @@ TCP 三次握手后 → TLS 四轮握手
 3. client接收serverHello并用CA公钥验签数字证书,取出server公钥,加密pre-master随机数并发送给server
 4. server用私钥解密得到pre-master,双方基于三个随机数生成对称加密会话密钥，建立https连接
 建立连接后通过会话密钥传输信息
+# https怎样f
