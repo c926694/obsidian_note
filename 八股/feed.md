@@ -10,3 +10,7 @@ redis维护一个1m:xxxxxxxx某分钟内的所有视频热度
 形成merge zset,规则是相同video_id,score相加
 查询s.redisClient.ZRevRange(ctx, mergeKey, start, stop)
 然后根据video_ids去db补详情
+# JWT 鉴权与 Token 失效控制
+用jwt作用户认证,设置中间件在接收请求前校验jwt
+校验jwt后还需要查redis判断用户是否已下线或进入黑名单
+然后刷新token
