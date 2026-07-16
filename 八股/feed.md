@@ -10,6 +10,11 @@ kafka发送失败会
 形成merge zset,规则是相同video_id,score相加
 查询s.redisClient.ZRevRange(ctx, mergeKey, start, stop)
 然后根据video_ids去db补详情
+# 缓存删除
+视频更新后kafka异步删除缓存
+同步删除的话，删除缓存后，别的线程可能先读到旧db值，然后更新旧db缓存值
+
+
 # JWT 鉴权与 Token 失效控制
 采用access_token+refresh_token双token认证机制
 access_token用于用户认证,refresh_token用于刷新token
