@@ -11,6 +11,20 @@ redis维护一个1m:xxxxxxxx某分钟内的所有视频热度
 查询s.redisClient.ZRevRange(ctx, mergeKey, start, stop)
 然后根据video_ids去db补详情
 # JWT 鉴权与 Token 失效控制
-用jwt作用户认证,设置中间件在接收请求前校验jwt
-校验jwt后还需要查redis判断用户是否已下线或进入黑名单
-然后刷新token
+采用access_token+refresh_token双token认证机制
+access_token用于用户认证,refresh_token用于刷新token
+refresh_token存redis,用于多端登录和下线功能
+前端带access_token，当这个token过期了请求/refresh接口获取新的
+access_token
+# 推荐流
+传统分页一般这样做：
+```
+select * from video order by created_at desc limit 20 offset 100000;
+```
+
+问题是 `offset` 很大时，数据库要先跳过前面很多行，再取后面 20 条。对推荐流这种数据量大、更新频繁的场景，代价很高。
+
+主要有两个问题：
+
+1. 性能差  
+    `offset` 越大，扫描和丢弃的数据越多。哪怕最后只返回 10 条，也可能先扫几万、几十万条。
