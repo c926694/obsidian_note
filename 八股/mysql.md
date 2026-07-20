@@ -21,17 +21,6 @@
 4. **崩溃恢复** —— 通过 redo log 恢复未完成的事务，MyISAM 损坏后需要 `repair table`
 5. **聚簇索引** —— 索引和数据在一起，主键查询快
 
-## 什么是事务？事务四大特性 ACID
-
-事务是一组 SQL 操作，要么全部成功，要么全部失败回滚。四大特性：
-
-| 特性 | 含义 |
-|------|------|
-| **A**（原子性） | 事务不可分割，要么全做要么全不做。通过 undo log 实现回滚 |
-| **C**（一致性） | 事务前后数据状态一致，约束不被破坏。AID 保证了 C |
-| **I**（隔离性） | 并发事务互不干扰。通过锁和 MVCC 实现 |
-| **D**（持久性） | 事务提交后修改永久保存。通过 redo log 实现 |
-
 ## 数据库三范式？日常开发一定要严格遵守吗？
 
 | 范式               | 要求               | 举例                                |
@@ -71,6 +60,19 @@ UPDATE user SET name = '张三' WHERE id = 1;
 ⑪ 写入 binlog
 ⑫ 提交事务，redo log 进入 commit 阶段
 ```
+
+# 事务
+
+## 什么是事务？事务四大特性 ACID
+
+事务是一组 SQL 操作，要么全部成功，要么全部失败回滚。四大特性：
+
+| 特性 | 含义 |
+|------|------|
+| **A**（原子性） | 事务不可分割，要么全做要么全不做。通过 undo log 实现回滚 |
+| **C**（一致性） | 事务前后数据状态一致，约束不被破坏。AID 保证了 C |
+| **I**（隔离性） | 并发事务互不干扰。通过锁和 MVCC 实现 |
+| **D**（持久性） | 事务提交后修改永久保存。通过 redo log 实现 |
 
 ## MySQL 四大事务隔离级别
 
@@ -139,38 +141,6 @@ UPDATE user SET name = '张三' WHERE id = 1;
 1. **MVCC**（快照读）—— `SELECT` 走 MVCC，读事务开始时的快照，天然看不到其他事务插入的新行
 2. **间隙锁（Gap Lock）** / **Next-Key Lock**（当前读）—— `SELECT ... FOR UPDATE`、`UPDATE`、`DELETE` 走当前读时，对扫描到的范围加间隙锁，阻止其他事务在范围内插入新行
 
-## 事务的实现原理：MVCC 是什么？
-
-MVCC（Multi-Version Concurrency Control，多版本并发控制）是 InnoDB 实现隔离级别的核心技术。
-
-**核心思想：** 每一行数据维护多个版本，每个事务看到的是特定版本的快照，读不阻塞写，写不阻塞读。
-
-**实现依赖：**
-- **隐藏字段：** 每行有 `DB_TRX_ID`（最后修改的事务 ID）、`DB_ROLL_PTR`（指向 undo log 的指针）
-- **undo log：** 记录数据的历史版本，回滚时用
-- **Read View：** 事务启动时生成，记录当前活跃事务列表，决定该看到哪个版本
-
-**工作流程：**
-```sql
--- 事务 A（trx_id=100）执行
-UPDATE user SET name = 'B' WHERE id = 1;
-```
-```
-① 对 id=1 这行加行锁
-② 把原来的 name='A' 写入 undo log（老版本）
-③ 更新数据页为 name='B'，DB_TRX_ID=100
-④ 此时这行有两个版本：
-   ┌─────────────┬──────────────┐
-   │ name='B'    │  undo log    │
-   │ trx_id=100  │ → name='A'   │
-   │             │    trx_id=99 │
-   └─────────────┴──────────────┘
-```
-
-**事务 B（trx_id=101）SELECT id=1 时，通过 Read View 判断：**
-- trx_id=100 还没提交 → 不能看 name='B'
-- 顺着 undo log 找到 name='A'（trx_id=99 已提交）→ 返回 name='A'
-
 ## 可重复读隔离级别完全解决幻读了吗？
 
 **快照读（普通 SELECT）✅ 完全解决幻读** —— 读的是事务开始时的快照，其他事务插入的新行不可见。
@@ -195,6 +165,108 @@ UPDATE user SET name = 'B' WHERE id = 1;
 ```
 
 但严格来说这不叫幻读，因为 MySQL 的 REPEATABLE READ 实现中，`UPDATE` 会刷新当前事务的快照版本。**标准的 SQL 语义下，InnoDB 的 REPEATABLE READ 不会出现幻读。**
+
+# MVCC
+
+MVCC（Multi-Version Concurrency Control，多版本并发控制）是 InnoDB 实现事务隔离级别的核心技术，底层就三板斧：**隐式字段 + undo log 版本链 + Read View 可见性判断**。
+
+**核心思想：** 每行数据维护多个版本，读不阻塞写，写不阻塞读。
+
+### 快照读和当前读
+
+**快照读：** 普通 `SELECT`，读的是事务开始时的快照，不加锁。
+
+```sql
+SELECT * FROM user WHERE id = 1;  -- 快照读，不加锁
+```
+
+**当前读：** 读取数据的最新版本，会加锁。
+
+```sql
+SELECT * FROM user WHERE id = 1 FOR UPDATE;  -- 当前读，加行锁
+SELECT * FROM user WHERE id = 1 LOCK IN SHARE MODE;
+UPDATE user SET name = 'B' WHERE id = 1;     -- 当前读
+DELETE FROM user WHERE id = 1;               -- 当前读
+```
+
+### 三个隐式字段
+
+InnoDB 的每行数据有三个隐藏字段：
+
+| 字段 | 作用 |
+|------|------|
+| `DB_TRX_ID` | 最近修改这行的事务 ID |
+| `DB_ROLL_PTR` | 指向 undo log 中该行上一个版本的指针（回滚指针） |
+| `DB_ROW_ID` | 隐式自增 ID，没有主键时 InnoDB 用它生成聚簇索引 |
+
+### undo log 和版本链
+
+undo log 记录数据的历史版本。每次 `UPDATE` 或 `DELETE` 时，InnoDB 会把修改前的旧版本写入 undo log。
+
+```
+一行数据被修改 3 次后的版本链：
+
+当前数据页                          undo log 版本链
+┌──────────────┐                ┌──────────────┐
+│ name='C'     │  DB_ROLL_PTR  │ name='B'     │
+│ trx_id=103   │ ───────────→  │ trx_id=102   │
+│              │                │              │
+└──────────────┘                └──────┬───────┘
+                                       │ DB_ROLL_PTR
+                                       ↓
+                                  ┌──────────────┐
+                                  │ name='A'     │
+                                  │ trx_id=101   │
+                                  │              │
+                                  └──────────────┘
+```
+
+通过 `DB_ROLL_PTR` 把所有版本串联起来，就形成了**版本链**。
+
+### Read View
+
+Read View 是事务执行快照读时生成的"快照"，记录当前活跃事务的信息，决定当前事务能看到哪个版本。
+
+**四个核心字段：**
+
+| 字段 | 含义 |
+|------|------|
+| `m_ids` | 当前活跃（未提交）的事务 ID 列表 |
+| `min_trx_id` | `m_ids` 中最小的活跃事务 ID |
+| `max_trx_id` | 下一个要分配的事务 ID（即最大事务 ID + 1） |
+| `creator_trx_id` | 当前创建 Read View 的事务 ID |
+
+**可见性规则：**
+
+```
+DB_TRX_ID = 这行的最新修改事务 ID
+
+如果 DB_TRX_ID < min_trx_id        → ✅ 可见（该事务已提交）
+如果 DB_TRX_ID >= max_trx_id       → ❌ 不可见（是未来事务）
+如果 min_trx_id ≤ DB_TRX_ID       → 检查 DB_TRX_ID 是否在 m_ids 中
+    ├── 在 m_ids 中               → ❌ 不可见（还没提交）
+    └── 不在 m_ids 中             → ✅ 可见（已提交）
+```
+
+**不可见时顺着版本链找上一版，直到找到可见的版本。**
+
+### MVCC 怎么实现不同隔离级别
+
+**READ COMMITTED：** 每次 SELECT 都重新生成 Read View，所以能读到其他事务已提交的修改（不可重复读的原因）。
+
+**REPEATABLE READ：** 事务内第一次 SELECT 时生成 Read View，之后**复用同一个 Read View**，所以整个事务期间看到的数据版本一致（可重复读的原因）。
+
+```
+READ COMMITTED：          REPEATABLE READ：
+事务 A                   事务 A
+│                        │
+├─ SELECT → 生成 RV1     ├─ SELECT → 生成 RV ← 一直用这个
+│                        │
+├─ 事务 B COMMIT         ├─ 事务 B COMMIT
+│                        │
+├─ SELECT → 生成 RV2     ├─ SELECT → 复用上次的 RV
+│  看到 B 的修改 ✅       │  看不到 B 的修改 ✅
+```
 
 # 索引
 
