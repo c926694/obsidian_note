@@ -72,6 +72,130 @@ UPDATE user SET name = '张三' WHERE id = 1;
 ⑫ 提交事务，redo log 进入 commit 阶段
 ```
 
+## MySQL 四大事务隔离级别
+
+| 隔离级别 | 脏读 | 不可重复读 | 幻读 |
+|---------|:---:|:--------:|:---:|
+| **READ UNCOMMITTED**（读未提交） | ❌ 可能 | ❌ 可能 | ❌ 可能 |
+| **READ COMMITTED**（读已提交） | ✅ 解决 | ❌ 可能 | ❌ 可能 |
+| **REPEATABLE READ**（可重复读） | ✅ 解决 | ✅ 解决 | ❌ 可能 |
+| **SERIALIZABLE**（可串行化） | ✅ 解决 | ✅ 解决 | ✅ 解决 |
+
+**InnoDB 默认隔离级别：REPEATABLE READ**
+
+## 脏读、不可重复读、幻读
+
+**脏读：** 事务 A 读到事务 B **未提交**的数据，B 回滚后 A 读到的就是脏数据。
+
+```
+事务 A                     事务 B
+│                          │
+│  SELECT age → 20        │
+│                          │  UPDATE user SET age = 10
+│                          │  （未提交）
+│  SELECT age → 10 ← 脏读  │
+│                          │  ROLLBACK（age 回滚到 20）
+```
+
+**不可重复读：** 同一事务内两次读取同一行，结果不一样（因为其他事务提交改了这行）。
+
+```
+事务 A                     事务 B
+│                          │
+│  SELECT age → 20        │
+│                          │  UPDATE user SET age = 10
+│                          │  COMMIT
+│  SELECT age → 10 ← 不可重复读 |
+```
+
+**幻读：** 同一事务内两次范围查询，结果集行数不一样（因为其他事务**插入**了新行）。
+
+```
+事务 A                     事务 B
+│                          │
+│  SELECT * FROM user     │
+│  WHERE age > 10 → 3 条   │
+│                          │  INSERT INTO user (age=15)
+│                          │  COMMIT
+│  SELECT * FROM user     │
+│  WHERE age > 10 → 4 条   ← 幻读（多了一条）
+```
+
+## 四大隔离级别分别能解决哪些问题？
+
+| 隔离级别 | 防脏读 | 防不可重复读 | 防幻读 |
+|---------|:-----:|:----------:|:-----:|
+| READ UNCOMMITTED | ❌ | ❌ | ❌ |
+| READ COMMITTED | ✅ | ❌ | ❌ |
+| REPEATABLE READ | ✅ | ✅ | ❌（部分解决，见下文） |
+| SERIALIZABLE | ✅ | ✅ | ✅ |
+
+## 什么是幻读？怎么解决幻读？
+
+幻读是同一事务内两次范围查询结果行数不同，多出来的行是其他事务**插入**的。
+
+**InnoDB 在 REPEATABLE READ 下解决幻读的手段：**
+
+1. **MVCC**（快照读）—— `SELECT` 走 MVCC，读事务开始时的快照，天然看不到其他事务插入的新行
+2. **间隙锁（Gap Lock）** / **Next-Key Lock**（当前读）—— `SELECT ... FOR UPDATE`、`UPDATE`、`DELETE` 走当前读时，对扫描到的范围加间隙锁，阻止其他事务在范围内插入新行
+
+## 事务的实现原理：MVCC 是什么？
+
+MVCC（Multi-Version Concurrency Control，多版本并发控制）是 InnoDB 实现隔离级别的核心技术。
+
+**核心思想：** 每一行数据维护多个版本，每个事务看到的是特定版本的快照，读不阻塞写，写不阻塞读。
+
+**实现依赖：**
+- **隐藏字段：** 每行有 `DB_TRX_ID`（最后修改的事务 ID）、`DB_ROLL_PTR`（指向 undo log 的指针）
+- **undo log：** 记录数据的历史版本，回滚时用
+- **Read View：** 事务启动时生成，记录当前活跃事务列表，决定该看到哪个版本
+
+**工作流程：**
+```sql
+-- 事务 A（trx_id=100）执行
+UPDATE user SET name = 'B' WHERE id = 1;
+```
+```
+① 对 id=1 这行加行锁
+② 把原来的 name='A' 写入 undo log（老版本）
+③ 更新数据页为 name='B'，DB_TRX_ID=100
+④ 此时这行有两个版本：
+   ┌─────────────┬──────────────┐
+   │ name='B'    │  undo log    │
+   │ trx_id=100  │ → name='A'   │
+   │             │    trx_id=99 │
+   └─────────────┴──────────────┘
+```
+
+**事务 B（trx_id=101）SELECT id=1 时，通过 Read View 判断：**
+- trx_id=100 还没提交 → 不能看 name='B'
+- 顺着 undo log 找到 name='A'（trx_id=99 已提交）→ 返回 name='A'
+
+## 可重复读隔离级别完全解决幻读了吗？
+
+**快照读（普通 SELECT）✅ 完全解决幻读** —— 读的是事务开始时的快照，其他事务插入的新行不可见。
+
+**当前读（SELECT ... FOR UPDATE、UPDATE、DELETE）✅ 完全解决幻读** —— 用 Next-Key Lock 锁住范围和间隙，阻止插入。
+
+**但如果开发不规范的用法，还是可能遇到类似幻读的现象：**
+
+```
+事务 A                       事务 B
+│                            │
+│ SELECT * FROM user WHERE   │
+│ age > 10 → 3 条（快照读）    │
+│                            │ INSERT age=15
+│                            │ COMMIT
+│ UPDATE user SET name='x'   │
+│ WHERE age > 10             │
+│ （当前读，影响 4 条）         │
+│ SELECT * FROM user WHERE   │
+│ age > 10 → 4 条（快照读？）  │ ← 看到 4 条，因为 UPDATE
+│                            │   刷新了快照
+```
+
+但严格来说这不叫幻读，因为 MySQL 的 REPEATABLE READ 实现中，`UPDATE` 会刷新当前事务的快照版本。**标准的 SQL 语义下，InnoDB 的 REPEATABLE READ 不会出现幻读。**
+
 # 索引
 
 索引类似于书籍的目录，可以减少扫描的数据量，提高查询效率。
