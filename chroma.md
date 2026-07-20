@@ -156,24 +156,210 @@ collection_custom.add(
 
 ### 7. 持久化客户端（数据保存到磁盘）
 
+持久化是 Chroma 最常用的模式 —— 数据写入磁盘，下次重启程序时仍然可用。
+
+#### 7.1 基本用法
+
 ```python
-# 创建持久化客户端 —— 数据保存在指定目录
-persist_client = chromadb.PersistentClient(path="./chroma_data")
+import chromadb
 
-persist_collection = persist_client.create_collection(
-    name="persistent_demo"
-)
+# 关键：使用 PersistentClient 替代 Client()
+client = chromadb.PersistentClient(path="./chroma_data")
 
-persist_collection.add(
+# 第一次：创建集合并写入数据
+collection = client.get_or_create_collection(name="persistent_demo")
+
+collection.add(
     documents=["持久化到磁盘的数据，下次启动时仍然可用。"],
     ids=["persist_doc1"],
 )
 
-print(f"持久化集合中的文档数量：{persist_collection.count()}")
-
-# 下次使用时，只需用同样的 path 创建 PersistentClient
-# 然后通过 get_collection 获取已有的集合即可
+print(f"文档数量：{collection.count()}")
 ```
+
+#### 7.2 下次启动时读取已有数据
+
+```python
+import chromadb
+
+# 同一个 path，数据自动加载
+client = chromadb.PersistentClient(path="./chroma_data")
+
+# 获取已有的集合（不要用 create_collection，会报错）
+collection = client.get_collection(name="persistent_demo")
+
+# 数据还在！
+print(f"文档数量：{collection.count()}")  # 输出 1
+
+# 可以继续查询和添加
+results = collection.query(
+    query_texts=["持久化存储"],
+    n_results=5,
+)
+print(results["documents"])
+```
+
+#### 7.3 完整的新建 -> 写入 -> 重启 -> 读取流程
+
+```python
+"""
+第一次运行：写入数据
+"""
+import chromadb
+
+client = chromadb.PersistentClient(path="./chroma_data")
+collection = client.get_or_create_collection(name="notes")
+
+collection.add(
+    documents=["今天学习了 Chroma 的持久化配置。", "向量数据库可以把数据存到磁盘上。"],
+    ids=["note1", "note2"],
+)
+```
+
+```python
+"""
+第二次运行：读取之前的数据，继续添加
+"""
+import chromadb
+
+client = chromadb.PersistentClient(path="./chroma_data")  # 同一个目录
+collection = client.get_collection(name="notes")           # 获取已有集合
+
+print(f"已有文档数：{collection.count()}")                 # 输出 2
+
+# 继续添加新数据
+collection.add(
+    documents=["持久化让数据不会因为程序重启而丢失。"],
+    ids=["note3"],
+)
+
+print(f"现在文档数：{collection.count()}")                 # 输出 3
+```
+
+## 服务端模式（Docker 部署，类似 MySQL）
+
+这是你想要的模式 —— Chroma 跑在 Docker 容器里作为独立服务，代码通过 HTTP 连接它。
+
+### 1. 拉取镜像并启动容器
+
+```bash
+# 拉取镜像
+docker pull chromadb/chroma
+
+# 启动容器（数据存在容器内，重启会丢）
+docker run -p 8000:8000 chromadb/chroma
+```
+
+### 2. 挂载数据卷（持久化，推荐）
+
+```bash
+# 数据保存在宿主机的 ./chroma-data 目录
+docker run -d \
+  --name chroma \
+  -p 8000:8000 \
+  -v ./chroma-data:/data \
+  chromadb/chroma
+```
+
+参数说明：
+
+| 参数 | 作用 |
+|------|------|
+| `-d` | 后台运行 |
+| `--name chroma` | 容器命名为 `chroma` |
+| `-p 8000:8000` | 映射端口，宿主机 8000 → 容器 8000 |
+| `-v ./chroma-data:/data` | 把宿主机目录挂载到容器内的 `/data`（持久化关键） |
+
+### 3. 验证服务是否启动
+
+```bash
+curl http://localhost:8000/api/v1/heartbeat
+```
+
+返回 `{"heartbeat":"..."}` 就说明成功了。
+
+### 4. Python 代码连接
+
+```python
+import chromadb
+
+# 像连 MySQL 一样连接远端的 Chroma 服务
+client = chromadb.HttpClient(host="localhost", port=8000)
+
+# 后面用法跟本地一模一样
+collection = client.get_or_create_collection(name="docker_demo")
+collection.add(
+    documents=["通过 Docker 服务存储的数据，和 MySQL 一样的用法。"],
+    ids=["doc1"],
+)
+
+results = collection.query(
+    query_texts=["Docker"],
+    n_results=5,
+)
+print(results["documents"])
+```
+
+### 5. Docker Compose（推荐）
+
+创建 `docker-compose.yml`：
+
+```yaml
+version: "3.8"
+services:
+  chroma:
+    image: chromadb/chroma
+    container_name: chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./chroma-data:/data
+    restart: unless-stopped
+```
+
+启动：
+
+```bash
+docker-compose up -d
+```
+
+### 6. 带认证（可选）
+
+```python
+# 服务端启动时传环境变量设置认证
+# docker run -e CHROMA_SERVER_AUTH_CREDENTIALS=admin:password ...
+
+# Python 客户端连接时带上认证
+client = chromadb.HttpClient(
+    host="localhost",
+    port=8000,
+    headers={"Authorization": "Basic YWRtaW46cGFzc3dvcmQ="},
+)
+```
+
+### 7. 跟 MySQL 对比
+
+| | **Chroma（Docker）** | **MySQL（Docker）** |
+|---|---|---|
+| 拉取镜像 | `docker pull chromadb/chroma` | `docker pull mysql` |
+| 启动 | `docker run -p 8000:8000 chromadb/chroma` | `docker run -p 3306:3306 mysql` |
+| 连接方式 | `HttpClient(host, port)` | `mysql.connector.connect(host, port)` |
+| 默认端口 | 8000 | 3306 |
+| 数据目录 | `/data` | `/var/lib/mysql` |
+| 无需额外安装 | 只需 `pip install chromadb`（客户端） | 只需 `pip install mysql-connector-python` |
+
+### 注意事项
+
+- **版本匹配**：Docker 镜像版本和 `chromadb` pip 包的版本最好保持一致，避免协议不兼容。
+- **查看最新版本**：去 [Docker Hub](https://hub.docker.com/r/chromadb/chroma) 查看可用 tags。
+- **数据卷路径**：Windows 上 `./chroma-data` 是相对路径，也可以用绝对路径如 `D:/chroma-data`。
+
+#### 7.5 注意事项
+
+- **不要混用客户端类型**：`PersistentClient` 写入的数据不能用 `Client()` 读取，反之亦然。
+- **`create_collection` vs `get_collection`**：第一次用 `create_collection`（或用 `get_or_create_collection` 更安全）；之后用 `get_collection`。
+- **`get_or_create_collection` 最省心**：存在就获取，不存在就创建，适合反复运行的脚本。
+- **目录结构**：在 `path` 目录下会自动生成 `chroma.sqlite3` 等文件，**不要手动修改它们**。
 
 ## 完整脚本
 
