@@ -90,3 +90,71 @@ CREATE INDEX idx_name ON user(name);
 -- 联合索引
 CREATE INDEX idx_name_age ON user(name, age);
 ```
+
+## 什么是回表查询
+
+使用**二级索引**查询时，二级索引的叶子节点只存了**主键值**，查完后还需要拿着主键值再到**聚簇索引**中查一次完整行数据，这第二次查找叫**回表**。
+
+```
+① 二级索引查找 → 找到叶子节点 [name='张三', id=5]  ← 只拿到主键
+② 用 id=5 到聚簇索引查完整行 ← 这就是回表
+```
+
+## 怎么避免回表
+
+### 1. 覆盖索引
+让查询的所有字段都包含在二级索引中，索引自己就够用，不用回表。
+```sql
+-- 有联合索引 (name, age)
+SELECT name, age FROM user WHERE name = '张三';  -- 不回表
+SELECT * FROM user WHERE name = '张三';           -- 回表
+```
+
+### 2. 只查索引中已有的字段
+避免 `SELECT *`，只查索引覆盖的字段。
+
+### 3. 合理设计联合索引
+把高频查询的字段都放进联合索引，让索引覆盖查询。
+```sql
+CREATE INDEX idx_name_age_city ON user(name, age, city);
+SELECT name, age, city FROM user WHERE name = '张三';  -- 不回表
+```
+
+### 4. 尽量用主键查询
+主键索引是聚簇索引，叶子节点就是完整行数据，天生不回表。
+```sql
+SELECT * FROM user WHERE id = 5;  -- 走聚簇索引，不回表
+```
+
+## 覆盖索引
+
+覆盖索引是指：**查询所需的所有字段都包含在同一个二级索引中**，只用二级索引就能拿到全部数据，**不需要回表**。
+
+```sql
+-- 有联合索引 (name, age, city)
+SELECT name, age, city FROM user WHERE name = '张三';  -- ✅ 覆盖，不回表
+SELECT name, age, address FROM user WHERE name = '张三'; -- ❌ 需回表
+```
+
+判断标准：二级索引的叶子节点 = 索引字段 + 主键字段，SELECT 的字段都在这个集合里就是覆盖索引。
+
+**使用场景：**
+- 高频查询字段建联合索引，如经常按 name 查 age 和 city，建 `(name, age, city)`
+- 统计类查询，`COUNT`/`SUM` 直接在索引上计算，不扫整行
+```sql
+-- 有 (status) 索引
+SELECT status, COUNT(*) FROM orders GROUP BY status;
+
+```
+- 分页查询，先走覆盖索引查出 id 再取完整行，减少随机 I/O
+```sql
+-- 先走覆盖索引查出 id（只扫索引树，不回表）
+SELECT id FROM orders ORDER BY created_at LIMIT 100000, 10;
+-- 再用这 10 个 id 去聚簇索引取完整行（只有 10 次回表）
+SELECT * FROM orders WHERE id IN ( ...上面查到的10个id... );
+
+```
+
+**好处：** 减少磁盘 I/O（少查一次 B+ 树）、减少随机 I/O、减少 Buffer Pool 占用。
+
+**注意：** 不要盲目把所有字段都加进联合索引，索引太大反而不如回表快。
