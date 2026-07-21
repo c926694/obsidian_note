@@ -22,4 +22,24 @@ async def main():
     print(time.time()-s)  
   
 asyncio.run(main())
+
+```
+# 绝对路径设置
+
+```py
+SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
+
+```
+**逐层拆解：**
+
+| 部分 | 含义 |
+|------|------|
+| `__file__` | 当前 `.py` 文件的路径（字符串） |
+| `Path(__file__)` | 转为 `pathlib.Path` 对象 |
+| `.resolve()` | 解析为**绝对路径**，消除 `..` 和符号链接 |
+| `.parent` | 往上一级目录 |
+| `.parent` | 再往上一级目录 |
+| `/ "skills"` | 路径末尾拼接 `skills` 目录 |
+
+**效果：** 从当前文件出发，向上两级找到 `skills/` 文件夹，得到一个**不依赖运行目录的稳定绝对路径**。常用于在项目内定位数据、配置、子模块等资源。~
 ```
