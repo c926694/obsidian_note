@@ -131,7 +131,7 @@ def _pattern_recognize(self, message: str) -> Dict[str, Any]:
 ```
 ### 投票决策
 根据三路的意图及可信度按照权重算每个意图的可信度
-最终
+最终根据可信度进行意图判断(<0.5视为都没把握，降级到other)
 ```py
 def _vote(self, llm: Dict, emb: Dict, pat: Dict) -> IntentCategory:  
     """加权投票。embedding 不可用时权重自动转移到 LLM 和 Pattern。"""  
