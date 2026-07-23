@@ -129,4 +129,27 @@ def _pattern_recognize(self, message: str) -> Dict[str, Any]:
                 best_score, best_cat = score, cat  
     return {"intent": best_cat, "confidence": best_score}
 ```
-### 
+### 投票决策
+```py
+def _vote(self, llm: Dict, emb: Dict, pat: Dict) -> IntentCategory:  
+    """加权投票。embedding 不可用时权重自动转移到 LLM 和 Pattern。"""  
+    if llm.get("failed"):  
+        if emb.get("intent") != IntentCategory.OTHER and emb.get("confidence", 0.0) > 0:  
+            return emb["intent"]  
+        if pat.get("intent") != IntentCategory.OTHER and pat.get("confidence", 0.0) > 0:  
+            return pat["intent"]  
+        return IntentCategory.OTHER  
+  
+    if self._embedding_enabled:  
+        weights = [(llm, 0.7), (emb, 0.2), (pat, 0.1)]  
+    else:  
+        weights = [(llm, 0.85), (pat, 0.15)]  
+    scores: Dict[IntentCategory, float] = {}  
+    for result, w in weights:  
+        cat  = result.get("intent", IntentCategory.OTHER)  
+        conf = result.get("confidence", 0.0)  
+        scores[cat] = scores.get(cat, 0.0) + w * conf  
+  
+    best = max(scores, key=scores.get)  # type: ignore  
+    return best if scores[best] >= self.threshold else IntentCategory.OTHER
+```
