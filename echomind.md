@@ -130,7 +130,7 @@ def _pattern_recognize(self, message: str) -> Dict[str, Any]:
     return {"intent": best_cat, "confidence": best_score}
 ```
 ### 投票决策
-根据三路的意图yi
+根据三路的意图及ke'x
 ```py
 def _vote(self, llm: Dict, emb: Dict, pat: Dict) -> IntentCategory:  
     """加权投票。embedding 不可用时权重自动转移到 LLM 和 Pattern。"""  
