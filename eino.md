@@ -10,6 +10,7 @@ if err != nil {
     panic(err)  
 }
 ```
+
 ```go
 msgs := []*schema.Message{  
     schema.SystemMessage("你是一个助手，请按照要求回答"),  
@@ -20,4 +21,23 @@ if err != nil {
     panic(err)  
 }  
 fmt.Println(res.Content)
+```
+
+## stream
+```go
+chunks, err := client.Stream(ctx, msgs)  
+if err != nil {  
+    panic(err)  
+}  
+defer chunks.Close()  
+for {  
+    chunk, err := chunks.Recv()  
+    if errors.Is(err, io.EOF) {  
+       break  
+    }  
+    if err != nil {  
+       fmt.Println(err)  
+    }  
+    fmt.Println(chunk.Content)  
+}
 ```
