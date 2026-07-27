@@ -41,3 +41,23 @@ for {
     fmt.Println(chunk.Content)  
 }
 ```
+## chatTemplate
+```go
+tpl := prompt.FromMessages(  
+    schema.FString,  
+    schema.SystemMessage(  
+       "你是{brand}客服。只依据已知资料回答。",  
+    ),  
+    schema.MessagesPlaceholder("history", true),  
+    schema.UserMessage(  
+       "资料：\n{context}\n\n问题：{question}",  
+    ),  
+)  
+  
+messages, err := tpl.Format(ctx, map[string]any{  
+    "brand":    "小米手机",  
+    "history":  []*schema.Message{schema.UserMessage("我现在用的是红米k20")},  
+    "context":  "红米k40s1999元",  
+    "question": "我想换个手机",  
+})
+```
