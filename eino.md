@@ -42,6 +42,8 @@ for {
 }
 ```
 ## chatTemplate
+结构化系统提示词构建
+**Placeholder**对应的变量必须是**[]*schema.Message**类型
 ```go
 tpl := prompt.FromMessages(  
     schema.FString,  
