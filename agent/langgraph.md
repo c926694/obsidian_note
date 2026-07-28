@@ -265,6 +265,130 @@ def worker(state: WorkerPrivateState):   # 接收私有 state
 | Output State | 限定出参 | 调用方 |
 | Private State | 节点间临时数据 | 特定节点 |
 
+# LLM 调用例子
+
+一个完整的 Agent 例子，从模型初始化到条件边路由：
+
+```python
+import os
+from dotenv import load_dotenv
+load_dotenv(override=True)
+
+# ===== 1. 定义 State =====
+# 继承 MessagesState 已经有 messages 字段
+class AgentState(MessagesState):
+    llm_calls: int       # 记录调用次数
+    final_answer: str    # 最终回复
+
+# ===== 2. 初始化模型 =====
+model = init_chat_model(
+    model=f"openai:{os.getenv('MODEL_NAME')}",
+    api_key=os.getenv('OPENAI_API_KEY'),
+    base_url=os.getenv("BASE_URL"),
+    temperature=0
+)
+
+# ===== 3. 定义工具 =====
+@tool
+def get_weather(city: str) -> str:
+    """查询城市天气"""
+    return f"{city}今天晴天，25°C"
+
+tools = [get_weather]
+model_with_tools = model.bind_tools(tools)
+
+# ===== 4. 定义节点 =====
+def llm_node(state: AgentState):
+    """LLM 节点：决定是否调用工具"""
+    result = model_with_tools.invoke([
+        SystemMessage(content="你是一个天气查询助手"),
+    ] + state["messages"])
+
+    return {
+        "messages": [result],
+        "llm_calls": state.get("llm_calls", 0) + 1  # 不需要 reducer，直接覆盖
+    }
+
+def tool_node(state: AgentState):
+    """工具节点：执行工具调用并返回结果"""
+    result = []
+    for tc in state["messages"][-1].tool_calls:
+        if tc["name"] == "get_weather":
+            observation = get_weather.invoke(tc["args"])
+        result.append(ToolMessage(content=observation, tool_call_id=tc["id"]))
+    return {"messages": result}
+
+def final_node(state: AgentState):
+    """最终节点：提取 AI 回复"""
+    return {"final_answer": state["messages"][-1].content}
+
+# ===== 5. 条件边 =====
+def should_continue(state: AgentState) -> Literal["tools", "final"]:
+    if state["messages"][-1].tool_calls:
+        return "tools"      # 有工具调用 → 去工具节点
+    return "final"          # 否则 → 返回最终结果
+
+# ===== 6. 构建图 =====
+builder = StateGraph(AgentState)
+
+builder.add_node("llm", llm_node)
+builder.add_node("tools", tool_node)
+builder.add_node("final", final_node)
+
+builder.add_edge(START, "llm")
+builder.add_conditional_edges("llm", should_continue, {
+    "tools": "tools",
+    "final": "final"
+})
+builder.add_edge("tools", "llm")   # 工具执行完继续调 LLM
+builder.add_edge("final", END)
+
+agent = builder.compile()
+
+# ===== 7. 运行 =====
+res = agent.invoke({
+    "messages": [HumanMessage(content="北京今天天气怎么样？")],
+    "llm_calls": 0,
+    "final_answer": ""
+})
+
+print(res["llm_calls"])      # → 2（第一次调 LLM + 工具返回后再调一次）
+print(res["final_answer"])   # → 北京今天晴天，25°C
+```
+
+## 核心流程
+
+```
+START → llm_node（LLM 决定是否调工具）
+          ↓
+     有工具调用？→ 是 → tool_node（执行工具）
+          ↓                    ↓
+         否                回到 llm_node
+          ↓
+       final_node（提取回复）
+          ↓
+        END
+```
+
+## llm_calls 为什么不需要 reducer
+
+`llm_calls` 是 `int` 类型，`llm_node` 每次把当前值 +1 后返回：
+
+```python
+"llm_calls": state.get("llm_calls", 0) + 1
+```
+
+**没有并行节点写这个字段**，所以默认覆盖行为就够了。这也是文档里 `llm_calls: int` 没加 `Annotated` 的原因~
+
+## 常见的 LLM 调用模式
+
+| 模式 | 适用场景 |
+|------|---------|
+| 单节点 LLM 无工具 | 简单问答 |
+| LLM + 工具循环 | 需要调用外部工具的 Agent |
+| LLM + 结构化输出 | 需要格式化回复的节点 |
+| 多 LLM 节点 | 不同节点用不同模型/提示词 |
+
 # 中断 (Interrupt)
 
 interrupt 让图执行到某个节点时暂停，等外部回复后再继续。
