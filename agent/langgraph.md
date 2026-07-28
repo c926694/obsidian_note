@@ -370,25 +370,6 @@ START → llm_node（LLM 决定是否调工具）
         END
 ```
 
-## llm_calls 为什么不需要 reducer
-
-`llm_calls` 是 `int` 类型，`llm_node` 每次把当前值 +1 后返回：
-
-```python
-"llm_calls": state.get("llm_calls", 0) + 1
-```
-
-**没有并行节点写这个字段**，所以默认覆盖行为就够了。这也是文档里 `llm_calls: int` 没加 `Annotated` 的原因~
-
-## 常见的 LLM 调用模式
-
-| 模式 | 适用场景 |
-|------|---------|
-| 单节点 LLM 无工具 | 简单问答 |
-| LLM + 工具循环 | 需要调用外部工具的 Agent |
-| LLM + 结构化输出 | 需要格式化回复的节点 |
-| 多 LLM 节点 | 不同节点用不同模型/提示词 |
-
 # 中断 (Interrupt)
 
 interrupt 让图执行到某个节点时暂停，等外部回复后再继续。
