@@ -173,6 +173,98 @@ for m in messages["messages"]:
     m.pretty_print()
 ```
 ![[Pasted image 20260710103443.png]]
+# 四种状态
+
+LangGraph 的四种 State 分别控制不同边界。
+
+## Overall State（全局状态）
+
+图内所有节点共享的完整状态，是"主 State"：
+
+```python
+class OverallState(TypedDict):
+    messages: Annotated[list, add_messages]
+    topic: str
+    result: str
+    _internal_counter: int   # 内部字段，不想暴露给外部
+```
+
+## Input State（输入状态）
+
+控制 `invoke()` 时用户**只需要传哪些字段**，屏蔽内部字段：
+
+```python
+class InputState(TypedDict):
+    messages: list    # 用户只传这个
+    topic: str
+
+class OverallState(InputState):
+    result: str
+    _internal_counter: int   # 用户不需要关心
+
+graph = StateGraph(OverallState, input=InputState)
+
+# 调用时只传 InputState 的字段即可
+graph.invoke({"messages": [...], "topic": "AI"})
+```
+
+## Output State（输出状态）
+
+控制 `invoke()` **返回哪些字段**，过滤掉中间过程字段：
+
+```python
+class OutputState(TypedDict):
+    result: str          # 只返回最终结果
+
+graph = StateGraph(OverallState, input=InputState, output=OutputState)
+
+res = graph.invoke({"messages": [...], "topic": "AI"})
+print(res)
+# → {"result": "..."} 只有 result，其他字段不返回
+```
+
+## Private State（私有状态）
+
+节点间传递的**临时中间数据**，不进入全局 State，通过 `Send` 传递：
+
+```python
+class OverallState(TypedDict):
+    tasks: list[str]
+    results: Annotated[list[str], operator.add]
+
+class WorkerPrivateState(TypedDict):
+    task: str            # 只有 worker 节点需要，不在全局 state 里
+    retry_count: int     # 临时字段
+
+def dispatcher(state: OverallState):
+    return [
+        Send("worker", WorkerPrivateState(task=t, retry_count=0))
+        for t in state["tasks"]
+    ]
+
+def worker(state: WorkerPrivateState):   # 接收私有 state
+    return {"results": [f"完成: {state['task']}"]}  # 写回全局
+```
+
+## 四种状态关系
+
+```
+用户 invoke(InputState)
+        ↓
+  图内部用 OverallState 流转
+        ↓ Send
+  节点拿到 PrivateState（临时）
+        ↓
+  invoke 返回 OutputState
+```
+
+| 类型 | 作用 | 谁看到 |
+|------|------|--------|
+| Overall State | 全图共享 | 所有节点 |
+| Input State | 限定入参 | 调用方 |
+| Output State | 限定出参 | 调用方 |
+| Private State | 节点间临时数据 | 特定节点 |
+
 # 中断 (Interrupt)
 
 interrupt 让图执行到某个节点时暂停，等外部回复后再继续。
