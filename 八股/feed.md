@@ -1,6 +1,6 @@
 # 点赞流程
 lua+redis点赞,kafka异步更新db,然后发送kafka更新热度,是增量更新
-kafka发送失败会
+kafka发送失败会回滚
 # 点赞查询
 点赞查询先查db,然后根据userId去redis isMember判断点赞状态
 # 热榜过程
@@ -14,6 +14,9 @@ kafka发送失败会
 视频更新后kafka异步删除缓存
 同步删除的话，删除缓存后，别的线程可能先读到旧db值，然后更新旧db缓存值
 异步删保证其它线程读的db是新的，这样缓存也是新值
+当缓存过期后，A读取到旧db,B修改db,B删缓存比A写入缓存更早
+
+![[Pasted image 20260730112411.png]]
 
 
 # JWT 鉴权与 Token 失效控制
