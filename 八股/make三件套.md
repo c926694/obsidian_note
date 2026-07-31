@@ -248,3 +248,29 @@ default:
     // 所有channel都不可用时执行
 }
 ```
+# 代码题
+## 控制协程超时退出
+```go
+package main  
+  
+import "time"  
+  
+func main() {  
+    done := make(chan struct{})  
+    go func() {  
+       timeout := time.After(2 * time.Second)  
+       for {  
+          select {  
+          case <-timeout:  
+             close(done)  
+             return  
+          default:  
+             time.Sleep(1 * time.Second)  
+             println("working")  
+          }  
+       }  
+    }()  
+    <-done  
+    println("done")  
+}
+```
