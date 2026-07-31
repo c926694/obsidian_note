@@ -250,6 +250,40 @@ default:
 ```
 # 代码题
 ## 控制协程超时退出
+### withTimeout
+```go
+package main  
+  
+import (  
+    "context"  
+    "fmt"    "time")  
+  
+func main() {  
+    ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)  
+    defer cancel()  
+    done := make(chan struct{})  
+    go func() {  
+       for {  
+          select {  
+          case <-ctx.Done():  
+             return  
+          default:  
+             fmt.Println("正在执行任务")  
+             time.Sleep(3 * time.Second)  
+             close(done) 
+             return  
+          }  
+       }  
+    }()  
+    select {  
+    case <-done:  
+       fmt.Println("任务完成")  
+    case <-ctx.Done():  
+       fmt.Println("任务取消")  
+    }  
+}
+```
+### After
 ```go
 package main  
   
