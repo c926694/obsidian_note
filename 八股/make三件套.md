@@ -39,7 +39,7 @@ Go1.18及以后，引入了新的扩容规则：
 
 go里面一切都是值类型
 
-**当slice作为函数参数****值传递**,函数形参是slice结构体,是值类型，**是对传入切片的值拷贝**
+**当slice作为函数参数****值传递,函数形参是slice结构体,是值类型，**是对传入切片的值拷贝**
 
 但是**结构体字段的数组是指针类型**,因此两者**共用同一个底层数组**,形参修改底层数组也会影响
 
@@ -73,8 +73,6 @@ type hmap struct {
    extra *mapextra // 指向mapextra 结构的指针，mapextra 存储map中的溢出桶
 }
 ```
-
-![](https://wcncb0zsg1fn.feishu.cn/space/api/box/stream/download/asynccode/?code=MGM1ZDIxN2M0YmMxZWQ2OGIyMmI4OTFkNDFlZjgyNmNfc1Bka1RUWEVNR3FFVllyeUhvaDVUQXp5NlJ5dWJlYXhfVG9rZW46UmRHSGJiR3hDb200Rzd4VXgwaWN4OEg5bnBoXzE3ODI4MzM5NTg6MTc4MjgzNzU1OF9WNA&add_watermark=true&scene_type=CCM)
 
 ## map遍历顺序
 
@@ -195,7 +193,7 @@ type hchan struct {
 
 还有个特殊情况是向已关闭的channel发送数据会直接panic。这是Go语言的设计原则，防止向已关闭的通道写入数据。
 
-## 读取数据
+## 读取数据+
 
 从channel读取数据也有几个关键步骤：
 
