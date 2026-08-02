@@ -1,253 +1,324 @@
-# 缓存穿透
+# 基础概念
 
-当请求查询不存在的key时，缓存和db都不存在,如果有人恶意执行这样的查询，db会扛不住
+## Redis 为什么快
 
-## 缓存空值
-
-即使redis和db都不存在数据，我们也去缓存空值到redis,让恶意请求不打到数据库
-
-## 布隆过滤器
-
-原理:维护一个bit位数组;
-
-1. 预热:通过多种哈希函数计算预热key位于的数组位置，标记为1
-
-2. 判断:对key进行多种哈希函数计算，如果结果位置都为1则通过布隆过滤器，有1个0则不通过
-
-- 布隆过滤器可能会导致误判，我们可以在设置布隆过滤器的时候指定误判率
-
-- 只用位数组计数，内存占用少,如果要降低误判率需要提高数组大小
-
-- 可以通过Guava、redisson框架设置布隆过滤器
-
-![](https://wcncb0zsg1fn.feishu.cn/space/api/box/stream/download/asynccode/?code=YjE0ZTYyZTYyNTUzMTYyMWQwMmYyMDViMWEyZjVmNjJfYm9BQzVrN2dSYU9QbGM3UU1ISjVSSHg0aEg3eVFZMlhfVG9rZW46UlNVaGJNQlVVb1pCSTd4bTBrUWNaVlI5blljXzE3ODMzMjI4NTQ6MTc4MzMyNjQ1NF9WNA&add_watermark=true&scene_type=CCM)
-
-# 缓存击穿
-
-热点key问题，一个高并发的key过期,请求直接打到db
-
-## 互斥锁
-
-当缓存过期了,一个线程获取到互斥锁，开始查询db，并写到缓存
-
-其余没有获取到互斥锁的线程while(true)循环查询缓存
-
-## 逻辑过期
-
-给缓存设置一个逻辑过期变量值,实际并不设置ttl
-
-查询redis判断是否过期
-
-过期则让一个线程去获取互斥锁开启异步线程查db更新缓存
-
-无论有没有获取锁，都直接返回旧数据
-
-**对比**
-
-1. 互斥锁强一致性，但性能低
-
-2. 逻辑过期高可以,不能保证数据绝对一致，只能是最终一致性
-
-## singleflight
-
-Go 标准库扩展包 `golang.org/x/sync/singleflight`
-
-原理：
-- 同一时刻多个 goroutine 请求同一个 key
-- 只有第一个真正执行，其余等待结果
-- 所有调用者共享同一个结果，避免重复查询 DB
-
-对比互斥锁：
-
-| | 互斥锁 | singleflight |
-|---|---|---|
-| 执行次数 | 排队，N个线程各执行1次 | 仅执行1次 |
-| 其余线程 | while(true)轮询缓存 | 直接等待结果 |
-| 适用场景 | 单机 | 单机（Go 项目） |
-
-# 缓存雪崩
-
-高并发场景，大量缓存key过期或者redis宕机导致大量请求打入db
-
-1. 随机ttl
-2. 多级缓存
-3. Redis集群
-4. 降级限流
-
-# 双写一致性
-
-对于同一个对象,要保证查询db和查询redis的数据一致
-
-
-选哪个方案看业务场景：
-
-| 场景 | 方案 | 一致性 |
-|---|---|---|
-| 普通项目 | 更新DB-删缓存 | 最终 |
-| 高并发、要更稳 | 延迟双删 | 最终 |
-| 已有MQ | 异步删 | 最终 |
-| 强一致 | 读写锁 | 强一致 |
-
-## 更新DB-删缓存（最常用）
-
-```python
-db.update(value)    # 更新DB
-redis.delete(key)   # 删缓存
-```
-
-最简方案，小项目够用。但高并发下可能刚删完缓存就被另一个线程写回旧数据。
-
-## 延迟双删
-保证读的db值是新的
-
-```python
-db.update(value)       # 1. 更新DB
-redis.delete(key)      # 2. 第一次删缓存
-time.sleep(0.5)        # 3. etcd读线程写回缓存
-redis.delete(key)      # 4. 第二次删兜底
-```
+**一、内存操作
 
 ```
-线程A                     线程B
-  │                        │
-  ├─ 删缓存 ──── 间隙 ────  ├─ 查缓存 → 没中
-  │                        ├─ 查DB → 读到旧值
-  ├─ 更新DB ────           ├─ 写回缓存(旧值) ❌
-  │                        │
-```
-第一次删掉旧数据，sleep 等读线程可能写回旧数据，第二次再删干净。
-
-## 异步删
-
-```
-更新DB → 发MQ消息 → 直接返回
-                ↓
-         消费者 → 删缓存
+磁盘寻址：约 10ms
+内存寻址：约 100ns
+              差 10 万倍
 ```
 
-适合已经用了 MQ 的项目，不需要业务代码里 sleep。
-注意：要保证 MQ 消息可靠投递（本地消息表或事务消息）。
+持久化（RDB/AOF）不阻塞主流程：RDB fork 子进程写，AOF 追加写文件+异步刷盘。
 
-## 读写锁（强一致）
+**二、单线程模型
 
-基于 Redisson 读写锁，写独占、读共享，保证强一致。性能低，适合秒杀/库存场景。
+6.0 之前网络 IO 和命令执行都是单线程。
 
-## Canal（解耦最彻底）
+**好处**：没有**锁竞争**、**上下文切换**
 
-监听 MySQL binlog 自动删缓存，业务代码完全不用管删缓存的事。引入成本高，大厂用得多。
+**代价**：只能用一核，所以 Redis 瓶颈在**网络 IO 和内存带宽**，不在 CPU。
 
-# 持久化
+6.0 之后引入多线程处理网络 IO，但命令执行仍然是单线程。
 
-## Rdb
+**注意**：单线程下执行慢命令（`KEYS *`、大 key 的 `HGETALL`）会阻塞整个 Redis。
 
-**Save**
+**三、多路 IO 复用（重点）**
 
-开启主进程进行持久化，会阻塞其它操作
+**对比理解**
 
-**Bgsave**
+```
+传统 BIO：
+线程1 ── read() ── 等数据 ── 被挂起
+线程2 ── read() ── 等数据 ── 被挂起
+N 个连接 = N 个线程，几千就撑不住了
 
-1. 主进程fork子进程,将页表也复制给子进程
+Redis epoll：
+主线程：epoll_wait() ← 内核通知哪些 FD 有数据
+        → 只处理有数据的 FD → read() → 执行 → write()
+        → 回到 epoll_wait()
+10 万连接 → epoll 只返回有数据的几个 → 只处理这几个
+```
 
-2. 子进程读取内存数据生成rdb二进制文件
+| | BIO | epoll（Redis） |
+|--|-----|---------------|
+| 等待方式 | 每连接一个线程阻塞 read | 一个线程等 epoll 通知 |
+| 连接数 | ~几千 | 10 万+ |
+| CPU 利用 | 线程切换浪费大量 CPU | 只处理有数据的连接 |
 
-- 子进程采用copy-on-write方式读取内存,
+**平台差异**：Linux 用 epoll、macOS 用 kqueue、Solaris 用 evport，统一封装在 ae 事件循环里。
 
-rdb读取过程中，主进程的新的写操作会产生新的内存副本,
+**四、数据结构优化**
 
-而子进程依旧读旧的内存
+| 结构     | 底层实现                       | 为什么快                   |
+| ------ | -------------------------- | ---------------------- |
+| String | SDS（Simple Dynamic String） | 存长度字段，取长度 O(1)；自动扩容防溢出 |
+| List   | quicklist（压缩链表+双向链表）       | 内存紧凑，减少碎片              |
+| Hash   | dict + ziplist（小数据）        | 小数据连续内存，cache 友好       |
+| Zset   | skiplist（跳表）               | 范围查询 O(logN)，实现简单      |
+| Set    | intset + dict              | 小整数连续数组，省内存            |
+|        |                            |                        |
 
-## Aof
+**为什么 Zset 用跳表不用平衡树**：跳表实现简单，范围查找不需要中序遍历，内存中比树更 cache friendly。
 
-内部记录redis执行的所有写命令
+## epoll 
 
-**对比**
+实现一个线程高效知道哪些连接有请求过来
+**一、没有 epoll 之前的两条路都走不通**
 
-默认只开启rdb
+**阻塞 IO + 每连接一线程**：10 万连接 = 10 万线程，线程栈 + 上下文切换爆炸，瓶颈在"线程数量"。
 
-![](https://wcncb0zsg1fn.feishu.cn/space/api/box/stream/download/asynccode/?code=Zjk1NzQ2ZGNhYTFjZmE1YWJlOTM4NGNiYjg4OGQ5ZjVfeFhWdTZaUDZoZmcyeWRIRGQ2RDBHRVU5Z1EyYXVHd0NfVG9rZW46TVd4WWJLMUtOb1lqU1B4UW8zV2NqQlk4bnZkXzE3ODMzMjI4NTQ6MTc4MzMyNjQ1NF9WNA&add_watermark=true&scene_type=CCM)
+**非阻塞 IO + 自旋轮询**：每轮 O(n) 挨个检查 fd 有没有数据，10 万次检查全浪费在"问"上，瓶颈在"扫描复杂度"。
 
-# 数据过期策略
+**二、epoll 的做法：把监听从用户态交给内核态**
 
-Redis 为了平衡 **CPU 开销******和****内存利用率****， 采用 **惰性删除 + 定期删除** 的过期策略。
+```
+用户注册关心的 fd（epoll_ctl）
+↓ 内核红黑树存 fd，有事件的挂进就绪链表
+epoll_wait() 直接返回就绪链表（只有几个）
+↓ 只处理这几个，O(1) 拿到结果
+```
 
-- **惰性删除**：访问 key 时检查是否过期
+关键：用户不再挨个问，内核主动通知"哪些就绪"，监听成本 O(n) → O(1)。
 
-- **定期删除**：Redis 周期性随机检查并删除过期 key
+**三、select / poll / epoll 对比**
 
-如果内存达到上限，还会触发 **内存淘汰策略**。
+| | select | poll | epoll |
+|--|--------|------|-------|
+| fd 数量限制 | 1024（FD_SETSIZE） | 无 | 无（百万级） |
+| 每次调用 | 全量拷贝 fd 集合 | 全量拷贝 fd 集合 | 内核维护，零拷贝 |
+| 扫描复杂度 | O(n) | O(n) | O(1) |
+| 通知方式 | 靠扫描 | 靠扫描 | 就绪链表通知 |
 
-# 数据淘汰策略
+**一句话记忆**：select/poll 是"用户挨个问"，epoll 是"内核主动通知"；前者 O(n)，后者 O(1)。
 
-Redis 在内存达到 `maxmemory` 限制时，会触发 **内存淘汰策略**。
+**五、6.0 多线程 IO（不是 epoll 变多线程）**
+多个线程都设置epoll_wait,内核可以通知多个线程,利用cpu核数
 
-常见策略包括：
+```
+6.0 前：epoll_wait → read → 执行命令 → write（全在主线程单线程）
+6.0 后：epoll_wait（仍单线程）→ IO 线程池并行 read / write
+        命令执行：仍是主线程单线程
+```
 
-- **LRU**：最近最少使用
+| 环节             | 6.0 前 | 6.0 后    |
+| -------------- | ----- | -------- |
+| epoll 监听       | 单线程   | 单线程（没变）  |
+| read/write 搬数据 | 主线程   | IO 线程池并行 |
+| 命令执行           | 单线程   | 单线程（没变）  |
 
-- **LFU**：访问频率最低
+## Redis 支持的数据类型
 
-- **random**：随机淘汰
+**5 大基础类型**
 
-- **TTL**：淘汰即将过期的数据
+| 类型 | 底层结构 | 核心特点 | 常用命令 | 典型场景 |
+|------|---------|---------|---------|---------|
+| String | SDS | 最基础，value 最大 512MB | SET / GET / INCR / EXPIRE | 缓存、计数器、分布式锁、Session |
+| List | quicklist | 双向链表，两端操作 O(1) | LPUSH / RPUSH / LPOP / BRPOP | 简单消息队列、最新列表、时间线 |
+| Hash | dict + listpack | 存对象，field 级操作 | HSET / HGET / HGETALL | 对象缓存（用户、商品信息） |
+| Set | intset + dict | 元素唯一、无序、集合运算 | SADD / SISMEMBER / SINTER / SUNION | 去重、共同好友、标签、抽奖 |
+| Zset | skiplist + dict | 按 score 排序，范围查询 | ZADD / ZRANGE / ZRANGEBYSCORE | 排行榜、延迟队列、滑动窗口限流 |
 
-- **noeviction**：不淘汰，直接报错
+**3 大特殊类型**
 
-allkeys-lru（最常见）
+| 类型 | 本质 | 核心特点 | 典型场景 |
+|------|------|---------|---------|
+| Bitmap（位图） | 就是 String 的位操作 | 1 bit 存一个状态，极省内存（10 亿人签到约 125MB） | 签到、在线状态 |
+| HyperLogLog | 去重计数算法 | 计数 2^64 个元素只需 12KB，误差 0.81%，非精确 | UV 统计 |
+| GEO | 底层 Zset + geohash 编码 | 存经纬度，支持距离计算、范围查找 | 附近的人、距离排序 |
 
-原因：
+**高级类型**
 
-- 可以淘汰所有 key
+| 类型 | 说明 | 场景 |
+|------|------|------|
+| Stream（5.0 引入） | 专为消息队列设计：消费者组、ack 确认、持久化、顺序保证 | 真正的消息队列 |
 
-- 符合缓存使用场景
+**易混点**
 
-# 主从集群
+- List 队列 vs Stream 队列：List 弹出即删，消费者挂了消息丢失、无确认；Stream 有 ack + 消费者组 + 持久化
+- Bitmap 没有独立结构：就是 String，用 SETBIT / GETBIT 按位操作
+- GEO 没有独立结构：底层是 Zset，score 存 geohash 编码
+- HyperLogLog 有误差（0.81%），精确计数用 Set 或 DB
+- Zset 底层 = skiplist + dict：跳表做范围查询，dict 做 O(1) 按 member 查 score
 
-![](https://wcncb0zsg1fn.feishu.cn/space/api/box/stream/download/asynccode/?code=ODc4Y2FkOGQwMDlkOGIzMGVmOTE1MDRiYmM5YjViMWZfbkx4dUk3TURtdFFFWmtwOGpCVkpnTXJRak5tdFcwZ2xfVG9rZW46S3IwbmJVTjZob2djWUh4R1ltM2NoMU5WblhjXzE3ODMzMjI4NTQ6MTc4MzMyNjQ1NF9WNA&add_watermark=true&scene_type=CCM)
+**时间复杂度速查**
 
-# 哨兵模式
+| 类型          | 增                  | 删                | 单点查                         | 范围查                       |
+| ----------- | ------------------ | ---------------- | --------------------------- | ------------------------- |
+| String      | O(1) SET           | O(1) DEL         | O(1) GET                    | 无                         |
+| List        | O(1) LPUSH / RPUSH | O(1) LPOP / RPOP | O(N) LINDEX                 | O(N) LRANGE               |
+| Hash        | O(1) HSET          | O(1) HDEL        | O(1) HGET                   | O(N) HGETALL（N = field 数） |
+| Set         | O(1) SADD          | O(1) SREM        | O(1) SISMEMBER              | O(N) SMEMBERS / SINTER    |
+| Zset        | O(logN) ZADD       | O(logN) ZREM     | O(1) ZSCORE / O(logN) ZRANK | O(logN+M) ZRANGE，M = 返回数  |
+| Bitmap      | O(1) SETBIT        | O(1)             | O(1) GETBIT                 | 无                         |
+| HyperLogLog | O(1) PFADD         | 无                | O(1) PFCOUNT                | 无                         |
+| GEO         | O(logN) GEOADD     | O(logN) ZREM     | O(logN) GEOPOS              | O(N+logM) GEOSEARCH       |
+| Stream      | O(1) XADD          | O(1) XDEL        | O(logN)                     | O(logN+M) XRANGE          |
 
-当redis主节点挂了，会选出一个从节点作为新的主节点，原来的主节点恢复后会变成从节点
+**复杂度要点**
 
-![](https://wcncb0zsg1fn.feishu.cn/space/api/box/stream/download/asynccode/?code=YTU0ZDllMWYwNGNhOTdiNThmNjEyYmNlNzAzNDYzOTFfT3FjTWliQmNzSzYwQ2VRaGk4UkdwM0EwcjVGcXZ6WkxfVG9rZW46SW9GcGJPZVk0b0F4aG94SENld2NtTlZlbkNiXzE3ODMzMjI4NTQ6MTc4MzMyNjQ1NF9WNA&add_watermark=true&scene_type=CCM)
+- Hash 的 HGETALL 是大 key 慢命令：field 上万时阻塞整个 Redis，改用 HSCAN 渐进遍历
+- List 的 LINDEX O(N)：别拿 List 当数组做随机访问
+- Set 集合运算（SINTER / SUNION）O(N)：集合巨大时全量计算很慢
+- Zset 单点 O(1)（dict）+ 范围 O(logN+M)（skiplist）→ 排行榜场景快的根本原因
+- 范围查几乎都是 O(logN+M)：**M 是返回条数，分页限制 M 比优化 N 更重要**
 
-## 监控机制
+## redis应用场景
+1. 缓存
+2. 存储会话
+3. 分布式锁
+4. 限流器
+5. 排行榜
+6. 用户关系
 
-多个sentinel进行ping来测试节点是否下线
+# 缓存
 
-![](https://wcncb0zsg1fn.feishu.cn/space/api/box/stream/download/asynccode/?code=OWM1MTlmZmYyNjA0MzVjNGQ4YjUzMTA0MWNiMDY3ZGRfNjlVQWlYdlhqRjg4N3psQ1pOeVlwTWZkYlkybHE0eTZfVG9rZW46VnBSRmJ1VkYxb1NFWUh4RlFhSWN0MkFHbnU4XzE3ODMzMjI4NTQ6MTc4MzMyNjQ1NF9WNA&add_watermark=true&scene_type=CCM)
+## 缓存穿透
 
-## 集群脑裂
+**定义**：查询一个**根本不存在的数据**——缓存没有，DB 也没有。每次请求都绕过缓存直接打到数据库，恶意攻击者专挑这种 key 打，能把 DB 打挂。
 
-**Redis 节点之间的数据同步以及** **Sentinel** **对节点状态的检测都依赖 网络通信。如果发生网络分区，例如 Sentinel 无法通过网络访问原** **Master****，就可能误认为 Master 已经宕机。**
+```
+正常请求：Redis 有 → 直接返回
+          Redis 无 → 查 DB → 有 → 回填缓存
+穿透请求：Redis 无 → 查 DB → 无 → 没有东西可回填
+          → 下次再来 → 还查 DB → 每次都穿透
+```
 
-脑裂是指由于 **网络分区（Network Partition）**，导致 Redis 集群中 **同时出现多个** **Master** **对外提供服务** 的情况。
+**产生原因**：
+1. 业务 bug / 用户传错参数：查了不存在的 id
+2. 恶意攻击：批量用不存在的 key 打接口（负数 id、随机字符串、越界 id）
+3. 缓存没有兜底：查不到就不缓存 → 同一个不存在的 key 每次都穿到 DB
 
-此时 Sentinel 会触发 **故障转移（Failover）**，从 Slave 中选举出一个新的 Master。但实际上原来的 Master 可能仍然在正常运行，并继续对外提供写服务。
+**本质**：缓存只对"存在的数据"有效，不存在的数据每次都要落 DB。
 
-于是就会出现：
+**四种解决方案**：
 
-- **旧** **Master** **继续接受写请求**
+**方案 1：缓存空值**（最简单、最常用）
+- 做法：DB 查不到时也写空值（null / 特殊标记）+ 短 TTL（如 5 分钟）
+- 优点：实现简单，一次穿透后后续请求全走缓存
+- 缺点：占内存；空值期间数据真实出现会短暂读不到（可接受）
 
-- **新** **Master** **也接受写请求**
+**方案 2：布隆过滤器**（治本，拦截在缓存之前）
+- 做法：合法 key 全集（所有用户 id）预载入，请求先过过滤器，**不存在直接拒绝**，不碰缓存和 DB
+- 特点："一定不存在" 100% 准；"存在"有误判率（宁错杀不放过）
+- 缺点：维护 key 全集成本，新增 key 需同步
+- 适用：key 集合相对固定（用户 id、商品 id）
 
-这样就会导致 **数据不一致甚至数据丢失**，这就是 Redis 的脑裂问题。
+**方案 3：参数合法性校验**（事前拦截，成本最低）
+- 做法：id 格式不对、负数、超范围，直接拒绝，连 Redis 都不发
+- 缺点：拦不住"格式合法但不存在"的 id，做第一道防线
 
-为了减少脑裂带来的数据丢失，Redis 提供了两个配置：
+**方案 4：限流 + 监控兜底**（最后防线）
+- 做法：监控缓存命中率、DB 异常查询量，发现攻击对该 IP / 接口限流熔断
+- 缺点：被动防御
 
-- **min-replicas-to-write**：要求至少有指定数量的从节点同步成功，Master 才允许写入
+## 缓存击穿
 
-- **min-replicas-max-lag**：限制从节点的最大同步延迟时间
+**定义**：**热点 key 在过期的那一刻**，大量并发请求同时发现缓存没有 → 同时打到 DB。和穿透的本质区别：**key 是真实存在的，只是恰好过期了**。
 
-通过限制 Master 的写入条件，可以在发生网络分区时降低数据丢失的风险。
+```
+热点 key（如秒杀商品）过期瞬间：
+请求1：缓存 miss → 查 DB
+请求2：缓存 miss → 查 DB
+请求3：缓存 miss → 查 DB
+... 上万个请求同时回源 → DB 瞬间被打垮
+```
 
-# 分片集群
+**产生原因**：
+1. 热点 key 的 TTL 到期，缓存失效
+2. 该 key 正在被高并发访问（热搜、爆款、秒杀品）
+3. 缓存重建（回源）没有串行化——所有请求各自去查 DB
 
-解决:
+**本质**：**缓存重建没有互斥**，一个 key 的失效引发瞬时并发全部穿透到 DB。
 
-1. 海量数据存储
+**解决方案**：
 
-2. 高并发写
+**方案 1：互斥锁**（保证重建只发生一次）
+- 做法：缓存 miss 后先抢分布式锁（`SET NX EX`），抢到的线程查 DB + 回填缓存；抢不到的**自旋重试**（或短暂等待后重读缓存）
+```
+GET cache → miss
+SET lock NX EX 3s → 失败 → 自旋：重试 GET cache（大概率已回填）
+                  → 成功 → 查 DB → 回填 → 释放锁
+```
+- 优点：实现直接，同一时刻只有一个请求打 DB，效果可靠
+- 缺点：有锁等待；锁必须设过期时间防死锁；多机部署要用**分布式锁**
+- 适用：对一致性要求高的场景
 
-- 如果想要相同业务的key落在同一范围的槽中,就可以加业务前缀作为有效部分参与哈希运算
+**方案 2：热点 key 永不过期**（逻辑过期）
+- 做法：**不设物理 TTL**，value 里额外存一个"逻辑过期时间"字段；读取时发现逻辑过期 → **返回旧值 + 异步线程去更新缓存**
+- 本质：缓存**永远有值**，请求永远不 miss，自然永远打不到 DB
+- 优点：没有"缓存空窗期"，请求永远有数据返回，性能最好
+- 缺点：数据短暂不一致（可能读到旧值）；需要后台异步任务负责刷新
+- 适用：热搜榜、商品详情这类"旧值可接受、并发极高"的热点数据
 
-![](https://wcncb0zsg1fn.feishu.cn/space/api/box/stream/download/asynccode/?code=N2U5YzRjNGViY2FjN2Q2MDg0NjkzMWQ5YTkxN2Y0MGZfUlB3SGlZNnIwS2R2MzhFaFVHcDA3TVpvdTZqTW1yaktfVG9rZW46SmpmU2JDak9nbzhBUGJ4bkFxUWNGV0lMbmFmXzE3ODMzMjI4NTQ6MTc4MzMyNjQ1NF9WNA&add_watermark=true&scene_type=CCM)
+**方案 3：singleflight（请求合并 / 单飞）**
+- 做法：进程内按 key 合并——同一 key 的并发请求**只放行一个**去查 DB，其他请求**直接共享第一个请求的结果**（挂起等结果，拿同一份数据）
+- 实现：Go 的 `golang.org/x/sync/singleflight`，`g.Do(key, fn)`
+- 和互斥锁的区别：互斥锁是"等锁释放后**重读缓存**"；singleflight 是"**直接复用结果**"，省一次缓存重读
+- 缺点：**进程内**有效——单实例 OK，多实例部署每个实例各合并各的，跨实例仍需分布式锁
+- 组合拳：本地 singleflight 合并 + 跨实例分布式锁兜底
+- 适用：高并发热点 key 重建、DB 热点查询合并
+
+**补充：热点预热**（配合用）
+- 定时任务在 key 过期**之前**提前刷新，让 TTL 永远续着，从源头避免过期瞬间
+
+## 缓存雪崩
+
+**定义**：**大量 key 在同一时刻集中过期**（或 Redis 宕机导致缓存整体失效），所有请求同时绕过缓存打到 DB，DB 被压垮。
+
+```
+正常：key1 过期 → key2 过期 → key3 过期（错峰，每时刻只有少量失效）
+雪崩：key1 key2 key3 同一时刻全部过期
+      → 上百万请求同时打 DB → DB 崩了
+```
+
+**产生原因**：
+1. 大量 key 设置了相同的过期时间（如缓存统一 1 小时，整点全过期）
+2. Redis 宕机 / 重启：缓存整体不可用，所有请求直接落 DB（比 key 过期更严重的雪崩）
+
+**解决方案
+
+**事前（预防为主）**：
+1. **过期时间加随机值**（最核心一招）：TTL = 基础值 + 随机值（如 1h + random(0, 10min)），key **错峰过期**
+2. 热点数据永不过期（逻辑过期，异步刷新）
+3. 多级缓存：本地缓存 + Redis 两级，Redis 挂了本地还能扛一阵
+4. 高可用架构：主从 + 哨兵 / Cluster，宕机自动切换，缩短整体不可用窗口
+
+**事中（保 DB 不死）**：
+1. 限流 + 熔断：对 DB 访问限流，超阈值直接降级返回
+2. 互斥锁 / singleflight：防止同一时刻百万请求同时重建缓存
+3. 服务降级：返回默认值 / 兜底数据
+
+**事后（恢复期）**：
+1. Redis 持久化（RDB / AOF）：重启后快速恢复，避免冷启动全部 miss
+2. 错峰重建：逐步回填缓存，防止恢复瞬间再次集中打 DB
+3. 监控告警 + 复盘：命中率 / QPS / DB 连接数监控，命中率骤降即告警
+
+## Redis 大 key
+
+**判定标准**：
+- String：value > 10KB
+- Hash / Set / Zset / List：元素 > 5000 个，或总内存 > 10MB
+
+**危害**：
+1. 慢命令阻塞：HGETALL / SMEMBERS / LRANGE 0 -1 在大 key 上是 O(N)，单线程下卡住整个 Redis
+2. 删除 / 过期也阻塞：DEL 大 key 是同步删除，O(N) 释放内存，主线程照卡
+3. 网络传输慢：大 value 序列化 + 传输占带宽
+4. 内存倾斜：集群下大 key 全落一个节点，该节点内存爆，其他节点空闲
+5. 持久化拖累：RDB 写盘、fork 时大 key 都是开销
+
+**怎么发现**：
+- `redis-cli --bigkeys`：在线扫描不阻塞，直接给 Top 大 key
+- `MEMORY USAGE key`（4.0+）：精确查单 key 内存
+- 慢日志：SLOWLOG 里频繁出现 HGETALL / SMEMBERS 全量命令就是信号
+
+**解决方案（核心 = 拆分）**：
+
+| 拆分方式 | 做法 | 适用 |
+|---------|------|------|
+| 拆 value | 大 JSON 拆字段改用 Hash | 大 String |
+| 分桶（hash tag） | `key:{0..99}`，field % 100 路由 | 大 Hash / 大 Set |
+| 拆时间 | `feed:20260801` 按天拆 | 大 List / 大 Zset |
+| 拆集合 | 按业务前缀 / 类别拆 | 大 Set |
+

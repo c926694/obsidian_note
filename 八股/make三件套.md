@@ -308,3 +308,104 @@ func main() {
     println("done")  
 }
 ```
+## 实现子任务出错退出和全部完成时通知
+### done模拟ctx
+```go
+package main  
+  
+import (  
+    "errors"  
+    "fmt"    "sync")  
+  
+func work(i int, done chan struct{}) error {  
+    select {  
+    case <-done:  
+       return nil  
+    default:  
+       if i == 60 {  
+          return errors.New("失败了")  
+       }  
+       select {  
+       case <-done:  
+          return nil  
+       default:  
+          fmt.Println("执行子任务:", i)  
+       }  
+       return nil  
+    }  
+}  
+  
+func main() {  
+    done := make(chan struct{})  
+    wg := &sync.WaitGroup{}  
+    var once sync.Once  
+    for i := 0; i < 10; i++ {  
+       wg.Add(1)  
+       go func(i int) {  
+          defer wg.Done()  
+          err := work(i, done)  
+          if err != nil {  
+             once.Do(func() {  
+                close(done)  
+             })  
+          }  
+       }(i)  
+    }  
+    wg.Wait()  
+    select {  
+    case <-done:  
+       fmt.Println("有失败的goroutine...")  
+    default:  
+       fmt.Println("所有goroutine都执行完毕")  
+    }  
+}
+```
+### ctx版本
+- 有err则cancel
+- 无论怎样都wg.Done()
+- 最后看ctx有无被cancel
+```go
+package main  
+  
+import (  
+    "context"  
+    "errors"    "fmt"    "sync")  
+  
+func work(ctx context.Context, i int) error {  
+    select {  
+    case <-ctx.Done():  
+       return nil  
+    default:  
+       if i == 6 {  
+          return errors.New("失败了")  
+       }  
+       fmt.Println("执行子任务:", i)  
+       return nil  
+    }  
+}  
+  
+func main() {  
+    wg := &sync.WaitGroup{}  
+    ctx, cancel := context.WithCancel(context.Background())  
+    var once sync.Once  
+    for i := 0; i < 10; i++ {  
+       wg.Add(1)  
+       go func(i int) {  
+          defer wg.Done()  
+          err := work(ctx, i)  
+          if err != nil {  
+             once.Do(func() {  
+                cancel()  
+             })  
+          }  
+       }(i)  
+    }  
+    wg.Wait()  
+    select {  
+    case <-ctx.Done():  
+       fmt.Println("有失败的goroutine...")  
+    default:  
+       fmt.Println("所有goroutine都执行完毕")  
+    }  
+}
+```
