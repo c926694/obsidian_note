@@ -94,3 +94,24 @@ func NewServiceContext(c config.Config) *ServiceContext {
     }  
 }
 ```
+
+# 自定义sql
+自定义sql写在生成的非gen结尾的文件里面
+```go
+type (  
+    // FriendsModel 好友关系数据访问接口  
+    FriendsModel interface {  
+       friendsModel  
+       // ListByUserid 查询某用户的好友列表  
+       ListByUserid(ctx context.Context, userId string) ([]*Friends, error)  
+       // FindByUidAndFid 查询某对好友关系是否存在  
+       FindByUidAndFid(ctx context.Context, userId string, friendUid string) (*Friends, error)  
+       // InsertFriendTx 事务内插入一条好友关系  
+       InsertFriendTx(ctx context.Context, session sqlx.Session, userId, friendUid string, addSource int64) error  
+    }  
+  
+    customFriendsModel struct {  
+       *defaultFriendsModel  
+    }  
+)
+```
