@@ -39,3 +39,6 @@ func (c *Conn) keepalive() {
 1. api层鉴权
 2. ws层jwt鉴权
 3. kafka从redis读取token设置header
+
+# 消息发送
+客户端发送消息给ws,ws发kafka异步存储消息
