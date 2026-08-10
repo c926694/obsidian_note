@@ -43,5 +43,7 @@ func (c *Conn) keepalive() {
 # 消息发送
 sender发送消息给ws,ws发kafka异步存储消息,存储完成后回流push数据给ws,ws发消息给recv
 group则是收集recvs,然后逐一发送
+
+group和single的区别只有recvId和chatType,一个直接是groupId了
 # 存储消息
 insert ChatLog+UpdateConv
