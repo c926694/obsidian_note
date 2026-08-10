@@ -35,3 +35,7 @@ func (c *Conn) keepalive() {
 }
 ```
 # 鉴权
+
+1. api层鉴权
+2. ws层jwt鉴权
+3. kafka从redis读取token设置header
