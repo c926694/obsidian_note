@@ -41,4 +41,7 @@ func (c *Conn) keepalive() {
 3. kafka从redis读取token设置header
 
 # 消息发送
-客户端发送消息给ws,ws发kafka异步存储消息
+sender发送消息给ws,ws发kafka异步存储消息,存储完成后回流push数据给ws,ws发消息给recv
+group则是收集recvs,然后逐一发送
+# 存储消息
+insert ChatLog+UpdateConv
