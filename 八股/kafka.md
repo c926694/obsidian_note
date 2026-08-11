@@ -347,3 +347,89 @@ Producer 发 A 和 B 到不同 Partition，网络延迟、batch 攒批、重试�
 | **多线程发乱序**           | 保证同 key 进同 Partition；若同 Partition 内也要保序，Producer 端按 key 串行发送(设置Sync:false)或用同步 `send().get()` |
 | **Consumer 多线程处理乱序** | 同一 Partition 只能单线程处理,即一个consumer+一个goroutine                                                  |
 
+# 消息堆积
+
+## 积压原因
+
+**消费端**（最常见）
+- 消费速度 < 生产速度（处理逻辑慢：调外部 API、DB 慢、重业务）
+- Consumer 数 < Partition 数（有 Partition 没人消费）
+- Consumer 挂掉/心跳超时被踢出组
+- Rebalance 频繁（Stop The World 停止消费）
+
+**生产端**
+- 瞬时流量突增（大促/秒杀），消费跟不上
+- 生产重试过多 + `acks=all`，写入变慢
+
+**Broker 端**
+- 磁盘 IO 瓶颈、网络带宽打满
+- 热点 Partition（数据分布不均，单分区堆积）
+- 机器资源不足、副本同步慢拖慢写入
+
+## 排查步骤
+
+```
+Step1  确认积压现状
+       kafka-consumer-groups --describe --group my-group
+       → 看每个 Partition 的 LAG（积压量）
+       → 哪个 Topic / Partition 积压最多？判断是否热点分区
+
+Step2  对比生产速率 vs 消费速率
+       看监控：每秒生产多少条 vs 每秒消费多少条
+       → 生产 > 消费 = 能力不足
+       → 生产 = 消费但 LAG 还在涨 = 有 Partition 没人消费
+
+Step3  检查 Consumer 状态
+       → Consumer 数量是否 < Partition 数？
+       → 有没有心跳超时、被踢出组、频繁 Rebalance 的日志？
+       → 有没有异常堆栈（调外部服务超时、DB 锁、OOM）？
+
+Step4  检查 Broker 状态
+       → 磁盘使用率？IO 等待？网络带宽？CPU？
+       → ISR 是否正常？有没有副本落后？
+
+Step5  定位根因
+       把以上数据对齐，判断瓶颈在哪一端
+```
+
+**核心判别法**：
+- LAG 均匀涨 + Consumer 正常 → **消费能力不足**
+- 某个 Partition LAG 特别高 → **热点分区**
+- Consumer 日志有 Rebalance/超时 → **消费中断**
+- Broker 磁盘/网络打满 → **服务端瓶颈**
+
+## 解决方案（按场景选）
+
+| 场景 | 最优方案 |
+|------|---------|
+| Consumer < Partition，消费能力不足 | 加 Consumer，加到 = Partition 数 |
+| 处理逻辑慢（外部调用/DB） | 优化逻辑：批量处理、异步化、加缓存，**别盲目加机器** |
+| 瞬时峰值积压 | 削峰填谷（限流/延迟生产），或临时扩容 |
+| 严重积压，正常消费来不及 | **旁路方案**：新建临时 Topic（更多 Partition）→ 开更多 Consumer 快速拉下来 → 落库/落文件 → 再异步补处理 |
+| 热点分区 | 重新设计 key 分布，拆 key 粒度，均衡分区 |
+| Broker 瓶颈 | 加机器、扩磁盘、调网络，均衡 Partition 分布 |
+
+**紧急兜底铁律**：先保证消息**不丢**（先拉下来存着），再慢慢处理，而不是硬扛。
+
+## 加消费者能解决积压吗
+
+**能解决，但有前提**：积压原因是 **Consumer 数 < Partition 数** 时，加 Consumer 立竿见影。
+
+**但 Consumer 数不能超过 Partition 数**：一个 Partition 同一时刻只能被一个 Consumer 消费（同一 Group 内），这是 Kafka 为了**保序**做的强制约束——一个 Partition 被多个 Consumer 并发消费，分区内有序就没了。
+
+```
+Partition:  P0    P1    P2    P3
+           ┌─┐   ┌─┐   ┌─┐   ┌─┐
+Consumer:  C1    C2    C3    C4    ← 各吃一个，正好
+
+再加 C5 → 没 Partition 可分 → C5 闲置摸鱼
+```
+
+**最大消费并行度 = Partition 数**，这是 Kafka 的硬上限。
+
+**加消费者的正确姿势**：
+- Consumer 数 < Partition 数 → 加 Consumer 有效，最多加到 Partition 数
+- Consumer 数 = Partition 数 → 加 Consumer 没用，瓶颈在 Partition 数 → 得先扩 Partition，再加 Consumer
+
+**面试一句话**：积压先看 LAG 定位瓶颈，Consumer 少就加消费者（上限是分区数），分区不够就扩分区，处理慢就优化逻辑，严重积压就旁路兜底。
+
