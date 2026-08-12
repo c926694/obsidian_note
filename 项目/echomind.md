@@ -662,6 +662,13 @@ async def _build_knowledge_context(message: str, top_k: int = 3) -> tuple[str, b
 ```
 
 # /chat接口
+1. 构建上下文
+2. 构建编排请求
+3. 处理编排请求(包括意图识别)
+4. 更新记忆
+5. 异步更新画像
+6. 返回响应
+
 ```python
 @app.post("/chat", response_model=ChatResponse)
 
