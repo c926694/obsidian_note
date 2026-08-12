@@ -660,3 +660,118 @@ async def _build_knowledge_context(message: str, top_k: int = 3) -> tuple[str, b
         logger.warning(f"构建知识库上下文失败: {ex}")  
         return "", False
 ```
+
+# /chat接口
+```python
+@app.post("/chat", response_model=ChatResponse)
+
+async def chat(req: ChatRequest):
+
+    """
+
+    主对话接口。完整流程：
+
+      记忆读取 → 意图识别 → Agent 路由 → 执行 → 记忆写入
+
+    """
+
+    if _orchestrator is None or _memory is None:
+
+        raise HTTPException(503, "服务未就绪")
+
+  
+
+    from agents.agent_orchestrator import Request as OrcReq
+
+    from memory.conversation_memory import MsgRole
+
+  
+
+    conv_id = req.conv_id or str(uuid.uuid4())
+
+  
+
+    # 1. 读取记忆上下文
+
+    mem_ctx = await _memory.get_context(req.user_id, conv_id, query=req.message)
+
+  
+
+    # 2. 构建编排请求（含对话历史，用于意图识别上下文）
+
+    history = [
+
+        {"role": m.role.value, "content": m.content}
+
+        for m in mem_ctx.recent_messages[-5:]
+
+    ] if mem_ctx.recent_messages else None
+
+  
+
+    knowledge_text, knowledge_used = await _build_knowledge_context(req.message)
+
+    context_parts = [mem_ctx.to_prompt_text()]
+
+    if knowledge_text:
+
+        context_parts.append(knowledge_text)
+
+    full_context = "\n\n".join(part for part in context_parts if part)
+
+  
+
+    orch_req = OrcReq(
+
+        message=req.message,
+
+        user_id=req.user_id,
+
+        conv_id=conv_id,
+
+        context=full_context,
+
+        history=history,
+
+    )
+
+  
+
+    # 3. 执行
+
+    result = await _orchestrator.run(orch_req)
+
+  
+
+    # 4. 写入记忆
+
+    await _memory.add_message(req.user_id, conv_id, MsgRole.USER, req.message)
+
+    await _memory.add_message(req.user_id, conv_id, MsgRole.ASSISTANT, result.response)
+
+  
+
+    # 5. 异步更新用户画像（不阻塞响应）
+
+    asyncio.create_task(_memory.update_profile(req.user_id, conv_id))
+
+  
+
+    return ChatResponse(
+
+        conv_id=conv_id,
+
+        response=result.response,
+
+        intent=result.intent.value if result.intent else "other",
+
+        agent_type=result.agent_type.value,
+
+        escalated=result.escalated,
+
+        latency_ms=round(result.latency_ms, 1),
+
+        knowledge_used=knowledge_used,
+
+    )
+```
