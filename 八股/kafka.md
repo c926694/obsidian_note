@@ -237,11 +237,11 @@ Consumer-1 加入 ────→│ 感知到成员变更
 
 **Broker 内部丢失**
 
-| 原因 | 说明 | 解决方案 |
-|------|------|----------|
-| 未刷盘宕机 | 消息还在 Page Cache，没落盘就断电 | `min.insync.replicas=2` 靠副本容错 |
-| `unclean.leader.election` | ISR 全挂，选了个落后副本当 Leader，缺消息 | `unclean.leader.election.enable=false` |
-| 副本不足 | `min.insync.replicas=1`，唯一副本挂就丢 | `replication.factor=3` + `min.insync.replicas=2` |
+| 原因                        | 说明                              | 解决方案                                             |
+| ------------------------- | ------------------------------- | ------------------------------------------------ |
+| 未刷盘宕机                     | 消息还在 Page Cache，没落盘就断电          | `min.insync.replicas=2` 靠副本容错                    |
+| `unclean.leader.election` | ISR 全挂，选了个落后副本当 Leader，缺消息      | `unclean.leader.election.enable=false`           |
+| 副本不足                      | `min.insync.replicas=1`，唯一副本挂就丢 | `replication.factor=3` + `min.insync.replicas=2` |
 
 **消费阶段（Broker → Consumer）**
 
