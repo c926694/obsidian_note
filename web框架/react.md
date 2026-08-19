@@ -291,3 +291,22 @@ useEffect(() => {
 
   });
 ```
+
+# useRef
+用于获取标签dom的
+可以执行dom的方法
+```tsx
+const inputRef= useRef<HTMLInputElement>(null)
+
+useEffect(() => {
+
+    inputRef.current?.focus()
+
+    console.log("更新");
+
+  });
+  
+<input ref={inputRef}>
+
+        </input>
+```
