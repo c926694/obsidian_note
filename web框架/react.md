@@ -315,7 +315,7 @@ useEffect(() => {
 ## 存储数据
 useRef修改后不会被主动渲染
 可以用于保存count的上一个值
-因为
+因为count修改后
 ```tsx
   const countRef = useRef(0);
   useEffect(() => {
