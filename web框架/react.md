@@ -152,3 +152,46 @@ function App() {
 
 }
 ```
+
+# state
+## 修改对象
+useState声明的如果是引用类型修改则需要传一个新对象
+**对象写法**
+```tsx
+const [user, setUser] = useState({
+
+    name: "cp",
+
+    age: 18,
+
+  });
+  function handleAdd() {
+
+    setUser({
+
+      ...user,
+
+      age: user.age + 1,
+
+    });
+
+  }
+```
+
+**回调函数写法**
+这里是从函数中获取原来的对象更新
+在连续更新的情况更好，因为始终拿到的是上一个对象的值
+更推荐
+```tsc
+function handleAdd() {
+
+    setUser((prev) => ({
+
+      ...prev,
+
+      age: prev.age + 1,
+
+    }));
+
+  }
+```
