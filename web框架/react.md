@@ -311,3 +311,20 @@ useEffect(() => {
 
         </input>
 ```
+
+## 存储数据
+useRef修改后不会被主动渲染
+可以用于保存count的上一个值
+因为
+```tsx
+  const countRef = useRef(0);
+  useEffect(() => {
+
+    inputRef.current?.focus()
+
+    countRef.current = count
+
+    console.log("更新");
+
+  });
+```
