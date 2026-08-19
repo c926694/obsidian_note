@@ -249,3 +249,45 @@ return的时候通过三目运算符
 
       </div>
 ```
+
+# Hooks
+生命周期函数
+[]表示组件挂载的时候调用
+[count]表示count渲染的时候调用
+啥也不写的表示任何数据渲染的时候调用
+return的回调函数则是组件卸载的时候调用
+```tsx
+useEffect(() => {
+
+    console.log("变化", count);
+
+    document.title = `You clicked ${count} times`;
+
+  }, [count]);
+
+  
+
+  useEffect(() => {
+
+    console.log("挂载");
+
+  }, []);
+
+  
+
+  useEffect(() => {
+
+    console.log("更新");
+
+  });
+  
+  useEffect(() => {
+
+    return () => {
+
+      console.log("卸载");
+
+    };
+
+  });
+```
