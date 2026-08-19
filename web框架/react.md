@@ -106,3 +106,19 @@ return (
 
   )
 ```
+
+# 事件
+事件触发后执行绑定函数
+无参则直接函数名
+有参需要写成箭头函数的形式
+```tsx
+function handleClick(name:string) {
+
+    console.log(name);
+
+  setCount(count + 1)
+
+}
+
+<button onClick={() => handleClick("cp")}>+</button>
+```
