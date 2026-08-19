@@ -195,3 +195,42 @@ function handleAdd() {
 
   }
 ```
+
+# 列表渲染
+通过map返回组件的形式渲染
+数组的修改要传入一个新数组
+```tsx
+<div>
+
+        {list.map((item) => {
+
+          return <div key={item.id}>{item.name}</div>;
+
+        })}
+
+      </div>
+
+      <div>
+
+        <button
+
+          onClick={() =>
+
+            setList([
+
+              ...list,
+
+              { id: list.length + 1, name: "cp" + (list.length + 1) },
+
+            ])
+
+          }
+
+        >
+
+          添加元素
+
+        </button>
+
+      </div>
+```
