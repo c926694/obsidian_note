@@ -75,3 +75,34 @@ function App() {
 
 }
 ```
+
+## 子组件回调数据
+父组件通过一个函数拿到子组件的数据并通过子组件调用该函数
+
+```tsx
+const [count, setCount] = useState(0)
+
+  return (
+
+    <div>
+
+      {props.title}----{count}<button onClick={() => setCount(count + 1)}>+</button>
+
+      {props.render?.(count)}
+
+    </div>
+
+  )
+```
+
+```tsx
+return (
+
+    <>
+
+    <HelloWorld title="Hello World" render={(count) => <h1>cp{count}</h1>} />
+
+    </>
+
+  )
+```
