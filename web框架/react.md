@@ -122,3 +122,33 @@ function handleClick(name:string) {
 
 <button onClick={() => handleClick("cp")}>+</button>
 ```
+
+## onChange
+给表单元素value绑定的
+```tsx
+function App() {
+
+  const [name, setName] = useState("")
+
+  
+
+  return (
+
+    <>
+
+    <input
+
+      value={name}
+
+      onChange={(e) => setName(e.target.value)}
+
+    />
+
+    {name}
+
+    </>
+
+  )
+
+}
+```
