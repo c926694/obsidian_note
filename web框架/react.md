@@ -196,7 +196,8 @@ function handleAdd() {
   }
 ```
 
-# 列表渲染
+# 渲染
+## 列表
 通过map返回组件的形式渲染
 数组的修改要传入一个新数组
 ```tsx
@@ -231,6 +232,20 @@ function handleAdd() {
           添加元素
 
         </button>
+
+      </div>
+```
+
+## 条件
+return的时候通过三目运算符
+```tsx
+<div>
+
+        {list.map((item)=> {
+
+          return item.id % 2 === 0 ? <div key={item.id}>{item.name}</div> : null
+
+        })}
 
       </div>
 ```
