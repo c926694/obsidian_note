@@ -1,11 +1,11 @@
 [
   "obsidian-excalidraw-plugin",
-  "obsidian-style-settings",
   "obsidian42-brat",
   "realclaudian",
   "obsidian-plugin-toc",
   "selection-format-toolbar",
   "obsidian-git",
   "mousewheel-image-zoom",
-  "opencode-obsidian"
+  "opencode-obsidian",
+  "obsidian-style-settings"
 ]
