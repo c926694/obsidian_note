@@ -1,0 +1,430 @@
+{
+  "source": "https://www.bilibili.com/video/BV1vT411g7L5/",
+  "oid": "470749415",
+  "target_type": 1,
+  "aid": "470749415",
+  "bvid": "BV1vT411g7L5",
+  "fetched_at": "2026-09-27 15:49:42",
+  "wbi_main_all_count": 20,
+  "top_level_count": 10,
+  "child_reply_count": 10,
+  "items": [
+    {
+      "rpid": "124481563328",
+      "root": "0",
+      "parent": "0",
+      "uname": "TTfanss",
+      "mid": "93993249",
+      "time": "2022-08-07 10:39:14",
+      "ctime": 1659839954,
+      "like": 3,
+      "message": "如果一个用户，关注了几千人，都是大V。用这种推拉结合的方式，难道要查几千个rpc吗？这就退化成读模式了吧",
+      "pictures": [],
+      "links": [
+        {
+          "title": "rpc",
+          "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=rpc&seid=17489768014830162613&from_avid=470749415&from_comid=124481563328&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+        },
+        {
+          "title": "大V",
+          "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E5%A4%A7V&seid=17489768014830162613&from_avid=470749415&from_comid=124481563328&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+        }
+      ],
+      "rcount": 9,
+      "up_liked": false,
+      "up_replied": true,
+      "parent_reply_member": null,
+      "children": [
+        {
+          "rpid": "124511184656",
+          "root": "124481563328",
+          "parent": "124481563328",
+          "uname": "mikkey2",
+          "mid": "489908999",
+          "time": "2022-08-07 14:15:11",
+          "ctime": 1659852911,
+          "like": 1,
+          "message": "同问",
+          "pictures": [],
+          "links": [],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": null
+        },
+        {
+          "rpid": "125413208080",
+          "root": "124481563328",
+          "parent": "124481563328",
+          "uname": "硬核课堂",
+          "mid": "1324259795",
+          "time": "2022-08-13 09:31:59",
+          "ctime": 1660354319,
+          "like": 1,
+          "message": "首先这种情况基本不存在，其次是不会🈶️几千个rpc  ，查询会按user id分片，rpc的数量仅与机器的数量相关，就如resis 分布式场景下的mget",
+          "pictures": [],
+          "links": [
+            {
+              "title": "分布式",
+              "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E5%88%86%E5%B8%83%E5%BC%8F&seid=13136044112123823265&from_avid=470749415&from_comid=125413208080&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+            }
+          ],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": null
+        },
+        {
+          "rpid": "125496448144",
+          "root": "124481563328",
+          "parent": "125413208080",
+          "uname": "TTfanss",
+          "mid": "93993249",
+          "time": "2022-08-13 19:21:09",
+          "ctime": 1660389669,
+          "like": 1,
+          "message": "回复 @硬核课堂 :感谢回复，我在说下我的困惑：微博就是可以有上千的关注数量啊，为啥不可能出现这种场景。然后这种场景，拉用户关注列表，关系服务一次rpc 返回的关注用户id 数量肯定有个上限，比如100个，那就是会有几十个rpc 。还要对于已关注的人拉他们的最新内容，再聚合。感觉很复杂，且不好分页",
+          "pictures": [],
+          "links": [
+            {
+              "title": "rpc",
+              "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=rpc&seid=13136044112123823265&from_avid=470749415&from_comid=125496448144&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+            }
+          ],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": {
+            "mid": "1324259795",
+            "name": "硬核课堂"
+          }
+        },
+        {
+          "rpid": "144517066416",
+          "root": "124481563328",
+          "parent": "125496448144",
+          "uname": "嘀咕皮辣椒红",
+          "mid": "246425934",
+          "time": "2022-12-31 20:32:42",
+          "ctime": 1672489962,
+          "like": 0,
+          "message": "回复 @TTfanss : 大V的数量本来就少，可能全网都没有几千个，更何况一个人用户去关注这么多大V，真实的场景中基本见不到",
+          "pictures": [],
+          "links": [],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": {
+            "mid": "93993249",
+            "name": "TTfanss"
+          }
+        },
+        {
+          "rpid": "147389534576",
+          "root": "124481563328",
+          "parent": "125496448144",
+          "uname": "抓水木的海绵宝宝",
+          "mid": "510638528",
+          "time": "2023-01-16 17:18:16",
+          "ctime": 1673860696,
+          "like": 0,
+          "message": "回复 @TTfanss : 我也遇到了这样的问题，分页可以用优化的归并进行优化，但是这个数据拉取，确实很耗资源，老哥，你是怎么解决的呢？可以讨论一下吗",
+          "pictures": [],
+          "links": [],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": {
+            "mid": "93993249",
+            "name": "TTfanss"
+          }
+        },
+        {
+          "rpid": "154902350912",
+          "root": "124481563328",
+          "parent": "144517066416",
+          "uname": "喜欢长瀞早濑的2Q丶",
+          "mid": "669012900",
+          "time": "2023-03-05 06:14:34",
+          "ctime": 1677968074,
+          "like": 0,
+          "message": "回复 @嘀咕皮辣椒红 :1. 怎么没有几千个，粉丝上百万的用户都不知道有多少，基本上你打开微博刷一下，下面每一个内容的发布者都有上百万粉丝，而你发生的关注行为极大概率发生在这部分大V用户上。\n2. 一个普通用户他关注的人里大部分是大V的概率远大于大部分是非大V用户的概率。至少我的微博里关注的人大部分都是几十上百万粉丝的，我都不是什么活跃用户了尚且如此，而且微博会老是让你关注一大批大V之后再进入微博（相信你如果使用过微博一定知道这个推荐关注的机制）\n所以说真实场景当中，一个用户关注的大多数用户为大V的情况非常普遍",
+          "pictures": [],
+          "links": [],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": {
+            "mid": "246425934",
+            "name": "嘀咕皮辣椒红"
+          }
+        },
+        {
+          "rpid": "164169429376",
+          "root": "124481563328",
+          "parent": "125496448144",
+          "uname": "吃饱了混日子",
+          "mid": "480891075",
+          "time": "2023-05-07 17:33:07",
+          "ctime": 1683451987,
+          "like": 0,
+          "message": "回复 @TTfanss : 服务层提供批量拉取接口，存储层针对大V用户读缓存",
+          "pictures": [],
+          "links": [
+            {
+              "title": "接口",
+              "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E6%8E%A5%E5%8F%A3&seid=13136044112123823265&from_avid=470749415&from_comid=164169429376&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+            }
+          ],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": {
+            "mid": "93993249",
+            "name": "TTfanss"
+          }
+        },
+        {
+          "rpid": "170012472976",
+          "root": "124481563328",
+          "parent": "147389534576",
+          "uname": "uid3123123341212",
+          "mid": "2484937",
+          "time": "2023-06-14 20:52:49",
+          "ctime": 1686747169,
+          "like": 0,
+          "message": "回复 @抓水木的海绵宝宝 :其实仔细想想微博不也照样挂。更多的服务器。更多的缓存，再进一步构建特定用户的缓存，大v的缓存，热点的缓存，活跃用户的缓存，等等",
+          "pictures": [],
+          "links": [],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": {
+            "mid": "510638528",
+            "name": "抓水木的海绵宝宝"
+          }
+        },
+        {
+          "rpid": "242972851936",
+          "root": "124481563328",
+          "parent": "147389534576",
+          "uname": "刘小胖同学_-",
+          "mid": "489793534",
+          "time": "2024-09-23 22:45:35",
+          "ctime": 1727102735,
+          "like": 0,
+          "message": "回复 @抓水木的海绵宝宝 : 感觉没必要全部拉取啊，用户完全看不完，比如user关注了2000个大V，全拉了屏幕都装不下，所以是不是可以第一次先拉50个维护topK缓存同时取top10返回，然后客户端异步再拉10个加入TopK缓存，user刷新的时候从缓存中取top10返回，一直迭代下去，知道TopK缓存ttl到期失效，user不可能一直刷下去嘛",
+          "pictures": [],
+          "links": [
+            {
+              "title": "TopK",
+              "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=TopK&seid=13136044112123823265&from_avid=470749415&from_comid=242972851936&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+            },
+            {
+              "title": "topK",
+              "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=topK&seid=13136044112123823265&from_avid=470749415&from_comid=242972851936&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+            }
+          ],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": {
+            "mid": "510638528",
+            "name": "抓水木的海绵宝宝"
+          }
+        }
+      ]
+    },
+    {
+      "rpid": "121451578528",
+      "root": "0",
+      "parent": "0",
+      "uname": "飒飒黎",
+      "mid": "2665410",
+      "time": "2022-07-18 23:39:07",
+      "ctime": 1658158747,
+      "like": 2,
+      "message": "催更",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "119678672384",
+      "root": "0",
+      "parent": "0",
+      "uname": "Confide__",
+      "mid": "11726629",
+      "time": "2022-07-06 22:50:19",
+      "ctime": 1657119019,
+      "like": 2,
+      "message": "罗辑nb",
+      "pictures": [],
+      "links": [
+        {
+          "title": "罗辑",
+          "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E7%BD%97%E8%BE%91&seid=17489768014830162613&from_avid=470749415&from_comid=119678672384&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+        }
+      ],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "119672363456",
+      "root": "0",
+      "parent": "0",
+      "uname": "希帅哥",
+      "mid": "25032541",
+      "time": "2022-07-06 22:09:48",
+      "ctime": 1657116588,
+      "like": 2,
+      "message": "logic牛逼",
+      "pictures": [],
+      "links": [
+        {
+          "title": "logic",
+          "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=logic&seid=17489768014830162613&from_avid=470749415&from_comid=119672363456&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+        }
+      ],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "131172174448",
+      "root": "0",
+      "parent": "0",
+      "uname": "DD-DC",
+      "mid": "189123725",
+      "time": "2022-09-24 11:03:42",
+      "ctime": 1663988622,
+      "like": 1,
+      "message": "这交流群是什么平台的群呀",
+      "pictures": [],
+      "links": [],
+      "rcount": 1,
+      "up_liked": false,
+      "up_replied": true,
+      "parent_reply_member": null,
+      "children": [
+        {
+          "rpid": "131193876672",
+          "root": "131172174448",
+          "parent": "131172174448",
+          "uname": "硬核课堂",
+          "mid": "1324259795",
+          "time": "2022-09-24 14:20:08",
+          "ctime": 1664000408,
+          "like": 1,
+          "message": "微信",
+          "pictures": [],
+          "links": [],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": null
+        }
+      ]
+    },
+    {
+      "rpid": "119739938464",
+      "root": "0",
+      "parent": "0",
+      "uname": "力战推推党",
+      "mid": "871815",
+      "time": "2022-07-07 12:58:50",
+      "ctime": 1657169930,
+      "like": 1,
+      "message": "牛哇！",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "119692513712",
+      "root": "0",
+      "parent": "0",
+      "uname": "Confide__",
+      "mid": "11726629",
+      "time": "2022-07-07 00:36:29",
+      "ctime": 1657125389,
+      "like": 1,
+      "message": "催更催更！！",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "119689166784",
+      "root": "0",
+      "parent": "0",
+      "uname": "复制Ctrl-C",
+      "mid": "11619447",
+      "time": "2022-07-07 00:06:12",
+      "ctime": 1657123572,
+      "like": 1,
+      "message": "顶",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "240032662128",
+      "root": "0",
+      "parent": "0",
+      "uname": "和平老三_不会写代码",
+      "mid": "8491739",
+      "time": "2024-08-25 14:29:26",
+      "ctime": 1724567366,
+      "like": 0,
+      "message": "请问 后面说的topk feed的课程在哪里讲？",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "234962720240",
+      "root": "0",
+      "parent": "0",
+      "uname": "_须臾1",
+      "mid": "107768025",
+      "time": "2024-08-01 11:20:09",
+      "ctime": 1722482409,
+      "like": 0,
+      "message": "这个还会更新吗",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    }
+  ],
+  "total_fetched_comments": 20
+}

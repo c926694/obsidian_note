@@ -1,0 +1,273 @@
+{
+  "source": "https://www.bilibili.com/video/BV11Y4y1j7g1/",
+  "oid": "643768411",
+  "target_type": 1,
+  "aid": "643768411",
+  "bvid": "BV11Y4y1j7g1",
+  "fetched_at": "2026-09-27 15:49:43",
+  "wbi_main_all_count": 12,
+  "top_level_count": 10,
+  "child_reply_count": 2,
+  "items": [
+    {
+      "rpid": "122511108080",
+      "root": "0",
+      "parent": "0",
+      "uname": "你的小鱼鱼儿",
+      "mid": "518049701",
+      "time": "2022-07-25 23:05:55",
+      "ctime": 1658761555,
+      "like": 3,
+      "message": "博主能分享一期博文的转评赞的系统设计吗？我感觉工作中好多场景都和转评赞类似，但是却不知道目前的生产实践的方案。",
+      "pictures": [],
+      "links": [
+        {
+          "title": "博文",
+          "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E5%8D%9A%E6%96%87&seid=2296671650630222628&from_avid=643768411&from_comid=122511108080&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+        },
+        {
+          "title": "系统设计",
+          "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E7%B3%BB%E7%BB%9F%E8%AE%BE%E8%AE%A1&seid=2296671650630222628&from_avid=643768411&from_comid=122511108080&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+        }
+      ],
+      "rcount": 2,
+      "up_liked": true,
+      "up_replied": true,
+      "parent_reply_member": null,
+      "children": [
+        {
+          "rpid": "122866069936",
+          "root": "122511108080",
+          "parent": "122511108080",
+          "uname": "硬核课堂",
+          "mid": "1324259795",
+          "time": "2022-07-28 08:06:38",
+          "ctime": 1658966798,
+          "like": 1,
+          "message": "这类数据跟关系存储是一样的，用 kv 或者 图数据库的比较多，写吞吐要求高，读延迟要求低。\n写可以先端上给自己先展示(点赞)，保值数据一致性，然后底层异步的最终一致即可。 跟我讲的counter server 类似。 点赞数，转发数。\n\n当然 评论是另一个话题，因为他的一致性要求最高。我们可以单独拿一期来讲。",
+          "pictures": [],
+          "links": [
+            {
+              "title": "counter",
+              "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=counter&seid=5360321757655671254&from_avid=643768411&from_comid=122866069936&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+            },
+            {
+              "title": "server",
+              "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=server&seid=5360321757655671254&from_avid=643768411&from_comid=122866069936&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+            }
+          ],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": null
+        },
+        {
+          "rpid": "122996285008",
+          "root": "122511108080",
+          "parent": "122866069936",
+          "uname": "你的小鱼鱼儿",
+          "mid": "518049701",
+          "time": "2022-07-28 23:34:51",
+          "ctime": 1659022491,
+          "like": 0,
+          "message": "回复 @硬核课堂 :好的，我还要回顾一下之前的视频。[doge]图数据库性能跟得上吗？我听说我们有一个需求用了图数据库存关系，说性能不大好。",
+          "pictures": [],
+          "links": [
+            {
+              "title": "图数据库",
+              "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E5%9B%BE%E6%95%B0%E6%8D%AE%E5%BA%93&seid=5360321757655671254&from_avid=643768411&from_comid=122996285008&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+            },
+            {
+              "title": "跟得上吗？",
+              "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E8%B7%9F%E5%BE%97%E4%B8%8A%E5%90%97%EF%BC%9F&seid=5360321757655671254&from_avid=643768411&from_comid=122996285008&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+            }
+          ],
+          "rcount": 0,
+          "up_liked": false,
+          "up_replied": false,
+          "parent_reply_member": {
+            "mid": "1324259795",
+            "name": "硬核课堂"
+          }
+        }
+      ]
+    },
+    {
+      "rpid": "148362119968",
+      "root": "0",
+      "parent": "0",
+      "uname": "有所谓一点",
+      "mid": "53285473",
+      "time": "2023-01-21 21:34:17",
+      "ctime": 1674308057,
+      "like": 2,
+      "message": "目前b站看过最硬核的技术分享，这文档有东西的",
+      "pictures": [],
+      "links": [
+        {
+          "title": "技术分享",
+          "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E6%8A%80%E6%9C%AF%E5%88%86%E4%BA%AB&seid=2296671650630222628&from_avid=643768411&from_comid=148362119968&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+        }
+      ],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "171930753856",
+      "root": "0",
+      "parent": "0",
+      "uname": "焦糖味香瓜子",
+      "mid": "282599736",
+      "time": "2023-06-27 01:28:48",
+      "ctime": 1687800528,
+      "like": 1,
+      "message": "内容很丰富 太厉害了。有个小建议 就是可以找个例子从头到尾串一下就更棒了",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": true,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "122344481824",
+      "root": "0",
+      "parent": "0",
+      "uname": "pink的叠",
+      "mid": "605495760",
+      "time": "2022-07-24 23:00:17",
+      "ctime": 1658674817,
+      "like": 1,
+      "message": "厉害",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "299907153568",
+      "root": "0",
+      "parent": "0",
+      "uname": "追忆成空zy",
+      "mid": "671258448",
+      "time": "2026-04-23 15:23:57",
+      "ctime": 1776929037,
+      "like": 0,
+      "message": "太硬了……最近正想做feed项目找实习，受益良多",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "270473067489",
+      "root": "0",
+      "parent": "0",
+      "uname": "一只好邪念",
+      "mid": "2059470",
+      "time": "2025-08-07 23:28:36",
+      "ctime": 1754580516,
+      "like": 0,
+      "message": "#此回复为复制粘贴，目的是干扰B站算法推荐，请忽略# 今天早上刚看完一篇关于光量子芯片的研究，下午又沉迷在虚幻5引擎打造的独立游戏里，晚上翻出一本《诗经今注今译》随手读了几章。前几天刚试着用树莓派连上了LoRa无线通信模块，结果中午刷短视频却被一个讲嵇康与阮籍的账号圈了粉。朋友还在群里讨论类脑计算和数字藏品，我却想推荐他们看看《浮生六记》。有时候觉得，世界太大了，想追的剧、装的mod、学的语言、烧的菜、开的源代码、写的词句、调的机器人，全都挤在同一个24小时里，真是幸福又混乱的一天。",
+      "pictures": [],
+      "links": [
+        {
+          "title": "树莓派",
+          "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E6%A0%91%E8%8E%93%E6%B4%BE&seid=2296671650630222628&from_avid=643768411&from_comid=270473067489&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+        },
+        {
+          "title": "类脑",
+          "url": "https://search.bilibili.com/all?from_source=webcommentline_search&keyword=%E7%B1%BB%E8%84%91&seid=2296671650630222628&from_avid=643768411&from_comid=270473067489&search_half_screen=0&half_screen_page_type=0&scroll_to_fullscreen=0"
+        }
+      ],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "136513666752",
+      "root": "0",
+      "parent": "0",
+      "uname": "cmliubilibili",
+      "mid": "433873982",
+      "time": "2022-11-06 22:44:51",
+      "ctime": 1667745891,
+      "like": 0,
+      "message": "文档只能在线查看",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "122364586848",
+      "root": "0",
+      "parent": "0",
+      "uname": "霏嗷奈我何",
+      "mid": "35589230",
+      "time": "2022-07-25 01:55:51",
+      "ctime": 1658685351,
+      "like": 0,
+      "message": "巨硬！",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "122364322096",
+      "root": "0",
+      "parent": "0",
+      "uname": "复制Ctrl-C",
+      "mid": "11619447",
+      "time": "2022-07-25 01:50:35",
+      "ctime": 1658685035,
+      "like": 0,
+      "message": "顶起",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    },
+    {
+      "rpid": "122348581488",
+      "root": "0",
+      "parent": "0",
+      "uname": "幻月sunshine",
+      "mid": "35942360",
+      "time": "2022-07-24 23:26:39",
+      "ctime": 1658676399,
+      "like": 0,
+      "message": "硬核",
+      "pictures": [],
+      "links": [],
+      "rcount": 0,
+      "up_liked": false,
+      "up_replied": false,
+      "parent_reply_member": null,
+      "children": []
+    }
+  ],
+  "total_fetched_comments": 12
+}
