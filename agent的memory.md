@@ -305,7 +305,7 @@ Actually, the launch moved to June.
 
 ## 来源、覆盖与局限
 
-**覆盖情况。** 这个视频的 B站字幕需要登录才能取，本机没有可用的浏览器桥接与语音识别环境（`check_environment.py` 报 `need_login_subtitle: true`、`web-access` 与 `ffmpeg` 均不可用），所以**没有拿到逐句字幕**。笔记内容来自四类可核对的材料：视频官方章节表（44 条时间轴，覆盖全部段落）、作者同一主题的开源对照实验记录（2026-08-12）、视频评论区 58 条（含作者本人回复）、以及 mem0 / Zep / LangMem / Graphiti 的官方文档与论文。
+**覆盖情况。** 这个视频的 B站字幕需要登录才能取，本机没有可用的浏览器桥接与语音识别环境（`check_environment.py` 报 `need_login_subtitle: true`、`web-access` 与 `ffmpeg` 均不可用），所以**没有拿到逐句字幕**。笔记内容来自四类可核对的材料：视频官方章节表（44 条时间轴，覆盖全部章节）、作者同一主题的开源对照实验记录（2026-08-12）、视频评论区 58 条（含作者本人回复）、以及 mem0 / Zep / LangMem / Graphiti 的官方文档与论文。
 
 **因此需要说明的地方。**
 
