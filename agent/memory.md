@@ -67,6 +67,7 @@ Working Memory 再送给 `LLM - Q&A Agent`（GPT、Claude）生成 Reply。这�
 
 需要区分的是：图里的触发时机只讲了读，即什么时候把持久记忆拉进 Working Memory（回答前检索）；而写，即什么时候把内容存进持久记忆，属于另一套机制，图中未体现。
 
+```mermaid
 flowchart TD
     A[收到用户新消息] --> B[按 session id 取出会话消息列表]
     B --> C[追加用户消息进列表]
@@ -87,3 +88,4 @@ flowchart TD
     N --> O[把回复追加进会话消息列表并写回存储]
     O --> P[后台提取稳定事实写入 Semantic Memory]
     P --> Q[返回 Reply 给用户]
+```
