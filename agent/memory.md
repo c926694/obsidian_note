@@ -66,3 +66,24 @@ Working Memory 再送给 `LLM - Q&A Agent`（GPT、Claude）生成 Reply。这�
 每一轮都在读写，随会话结束消失，本身不做持久存储。它的内容靠上面三类记忆按需注入来补充。
 
 需要区分的是：图里的触发时机只讲了读，即什么时候把持久记忆拉进 Working Memory（回答前检索）；而写，即什么时候把内容存进持久记忆，属于另一套机制，图中未体现。
+
+flowchart TD
+    A[收到用户新消息] --> B[按 session id 取出会话消息列表]
+    B --> C[追加用户消息进列表]
+    C --> D{上下文是否接近窗口上限}
+    D -- 是 --> E[增量摘要：旧摘要 + 本次移出的轮次]
+    E --> F[移出较早轮次原文，用摘要替换]
+    F --> G[移出的原文可选写入 Episodic Memory]
+    G --> H[检索持久记忆]
+    D -- 否 --> H
+    H --> I[加载 Skill.md 技能说明]
+    H --> J[RAG top-k 检索 Semantic Memory]
+    H --> K[RAG top-k 检索 Episodic Memory]
+    I --> L[组装 Working Memory：System Prompt + 摘要 + 近期原文 + 检索结果]
+    J --> L
+    K --> L
+    L --> M[发送给 LLM]
+    M --> N[得到 Reply]
+    N --> O[把回复追加进会话消息列表并写回存储]
+    O --> P[后台提取稳定事实写入 Semantic Memory]
+    P --> Q[返回 Reply 给用户]
