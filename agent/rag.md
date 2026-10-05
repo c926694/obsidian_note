@@ -30,7 +30,7 @@ flowchart LR
 - 嵌入模型：把文本映射为向量，要求语义相近的文本在向量空间中距离接近。
 - 向量数据库：存储向量并支持近似最近邻搜索（ANN），例如 FAISS、Milvus、pgvector、Qdrant。
 - 检索器：向量检索之外，常配合 BM25 等关键词检索，形成混合检索（hybrid search）。
-- 重排序（rerank）：用向量模型对初步结果精排。
+- 重排序（rerank）：用交叉编码器（cross-encoder）对初步结果精排。
 - 生成模型：接收拼接后的上下文，输出答案，通常要求注明引用来源。
 
 # 检索策略
@@ -49,21 +49,15 @@ flowchart LR
 4. 排序取回：按相似度从高到低排序，取前 topK 个片段作为检索结果。
 
 ```ts
-// 用 OpenAI 兼容的嵌入接口把文本转成向量
+import { pipeline } from "@huggingface/transformers";
+
+// 中文向量模型 BAAI/bge-large-zh-v1.5 的 ONNX 版本
+const extractor = await pipeline("feature-extraction", "Xenova/bge-large-zh-v1.5");
+
 async function embed(texts: string[]): Promise<number[][]> {
-  const response = await fetch("https://api.openai.com/v1/embeddings", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "text-embedding-3-small",
-      input: texts,
-    }),
-  });
-  const data = await response.json();
-  return data.data.map((item: { embedding: number[] }) => item.embedding);
+  // BGE 系列使用 CLS 池化，normalize 把向量归一化为单位向量
+  const output = await extractor(texts, { pooling: "cls", normalize: true });
+  return output.tolist();
 }
 
 function cosineSimilarity(a: number[], b: number[]): number {
@@ -290,40 +284,41 @@ async function hydeSearch(question: string, topK: number) {
 
 ## 7. 重排序（rerank）
 
-初步检索通常用向量模型，速度快但精度有限。重排序用向量模型，把「问题 + 片段」一起送入模型打分，精度更高，代价是速度慢，因此只对初步结果的少量片段精排。
+初步检索通常用双编码器（bi-encoder），速度快但精度有限。重排序用交叉编码器（cross-encoder），把「问题 + 片段」一起送入模型打分，精度更高，代价是速度慢，因此只对初步结果的少量片段精排。
 
 检索流程：
 
 1. 初步检索（向量、关键词或混合）得到一批候选，例如 20 到 50 条。
 2. 把「问题 + 每个候选片段」组成一对，得到若干输入对。
-3. 向量模型对每一对联合编码打分，得到相关性分数。
+3. 交叉编码器对每一对联合编码打分，得到相关性分数。
 4. 按新分数重新排序，取前 topN（例如 5 条）送入生成模型。
 
 ```ts
+import { AutoModelForSequenceClassification, AutoTokenizer } from "@huggingface/transformers";
+
+// 中文交叉编码器 BAAI/bge-reranker-base 的 ONNX 版本
+const rerankerId = "Xenova/bge-reranker-base";
+const rerankerTokenizer = await AutoTokenizer.from_pretrained(rerankerId);
+const rerankerModel = await AutoModelForSequenceClassification.from_pretrained(rerankerId);
+
 async function rerank(
   query: string,
   candidates: { id: number; text: string }[],
   topK: number,
 ): Promise<{ id: number; text: string; score: number }[]> {
-  const response = await fetch("https://api.jina.ai/v1/rerank", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.JINA_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "jina-reranker-v2-base-multilingual",
-      query,
-      documents: candidates.map((item) => item.text),
-      top_n: topK,
-    }),
+  // 把「问题 + 片段」组成文本对批量送入模型
+  const inputs = rerankerTokenizer(candidates.map(() => query), {
+    text_pair: candidates.map((item) => item.text),
+    padding: true,
+    truncation: true,
   });
-  const data = await response.json();
-  return data.results.map((item: { index: number; relevance_score: number }) => ({
-    id: candidates[item.index].id,
-    text: candidates[item.index].text,
-    score: item.relevance_score,
-  }));
+  const { logits } = await rerankerModel(inputs);
+  // 每个片段一个相关性分数
+  const scores = logits.tolist().map((row: number[]) => row[0]);
+  return candidates
+    .map((item, index) => ({ id: item.id, text: item.text, score: scores[index] }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
 }
 ```
 
