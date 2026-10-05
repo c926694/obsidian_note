@@ -115,7 +115,9 @@ Mem0 是夹在应用与大模型之间的一层记忆，入口只有两个：一
 | 实体集合 | 独立向量集合，载荷含 `data`、`entity_type`、`linked_memory_ids`、作用范围字段 | 实体匹配与加权                            |
 | SQL  | 历史表记录每次增删改轨迹，消息表存原始消息                                      | 变更审计、提取上下文；新版文档把 SQL 列为事实与元数据的权威来源 |
 
-实体与向量都用同一个向量库提供方，换成不同 collection 区分。实体集合第一次被用到时才创建。
+实体集合与记忆集合用同一个向量库提供方，靠不同的 collection 区分。开源版默认用 Qdrant（`path=/tmp/qdrant`），记忆集合默认名 `mem0`，实体集合名为 `mem0_entities`（分隔符是下划线，`s3_vectors` 提供方用短横线）。实体集合第一次被用到时才创建，Qdrant 场景下它复用记忆集合的 client，避免本地嵌入模式的锁竞争。换到其他提供方（chroma、pgvector、elasticsearch、milvus 等）时，两个集合仍成对出现，命名规则一致。
+
+关键词那一路依赖向量库实现 `keyword_search`，支持的有 qdrant、elasticsearch、pgvector 等。换到不支持的提供方时这一路会缺失，融合只剩语义与实体两路。
 
 ## SQL 日志
 
@@ -160,9 +162,9 @@ messages 表有保留上限：每个 `session_scope` 只保留最近 10 条 mess
 ```mermaid
 flowchart LR
     Q[查询] --> P[查询处理]
-    P --> S[语义 向量库]
-    P --> K[关键词 BM25]
-    P --> E[实体 加权与关系]
+    P --> S[语义 记忆集合]
+    P --> K[关键词 记忆集合]
+    P --> E[实体 实体集合]
     S --> M[合并打分]
     K --> M
     E --> M
@@ -176,6 +178,135 @@ flowchart LR
 - `filters` 按 `user_id`、`agent_id`、`run_id`、类别、日期做范围隔离与过滤。
 - `threshold` 与 `top_k` 决定返回哪些记忆，`rerank` 决定排列顺序，重排序增加约 150 到 200 毫秒延迟。
 - `explain=True` 可查看分项得分，包含语义分、归一化 BM25、实体加权、合并分与所用阈值。
+
+## 检索实现细节
+
+```mermaid
+flowchart TD
+    A["入参 query / filters / threshold / top_k"] --> B["校验 filters 必须含 user_id / agent_id / run_id"]
+    B --> C["预处理 lemmatize_for_bm25 + extract_entities"]
+    C --> D["编码查询向量"]
+    D --> E["语义检索 记忆集合 internal_limit = max(top_k * 4, 60)"]
+    E --> F["关键词检索 记忆集合 keyword_search"]
+    E --> H["实体加权 实体集合 向量比对 top_k=500 相似度 >= 0.5"]
+    F --> G["归一化 BM25 到 0 到 1"]
+    H --> I["boost = similarity * 0.5 * memory_count_weight"]
+    E --> J["组候选集 只取语义结果 跳过过期记忆"]
+    J --> K{语义分 >= threshold}
+    K -- 否 --> X["丢弃"]
+    K -- 是 --> L["combined = min((semantic + bm25 + boost) / max_possible, 1)"]
+    G --> L
+    I --> L
+    L --> M["按 combined 降序取 top_k"]
+    M --> N{rerank 且配置了重排序器}
+    N -- 是 --> O["交叉编码器精排"]
+    N -- 否 --> P["组装 MemoryItem"]
+    O --> P
+    P --> Q["返回 results"]
+```
+
+图中两个集合都在同一个向量库提供方里，默认是 Qdrant：语义与关键词查记忆集合 `mem0`，实体加权查实体集合 `mem0_entities`。SQL 不参与检索。
+
+入口签名：`search(query, top_k=20, filters, threshold=0.1, rerank=False, explain=False, show_expired=False)`。先校验 `filters` 必须包含 `user_id`、`agent_id`、`run_id` 三者之一，有 `AND`、`OR`、`gt` 这类操作符就先转换成向量库可用条件。
+
+核心函数 `_search_vector_store` 分九步：
+
+1. 预处理查询：`query_lemmatized = lemmatize_for_bm25(query)`，`query_entities = extract_entities(query)`。
+2. 编码查询：把查询转成向量。
+3. 语义检索：内部取值 `internal_limit = max(top_k * 4, 60)`，带 filters 在向量库检索，多取一些作为候选池。
+4. 关键词检索：`vector_store.keyword_search(query_lemmatized, top_k=internal_limit, filters)`。
+5. 归一化 BM25：用 sigmoid 把无上界的原始 BM25 分压到 `[0,1]`：
+
+   ```
+   normalize = 1 / (1 + exp(-steepness * (raw - midpoint)))
+   ```
+
+   `midpoint` 与 `steepness` 随查询词数变化：
+
+   | 词数 | midpoint | steepness |
+   |------|----------|-----------|
+   | ≤3 | 5.0 | 0.7 |
+   | ≤6 | 7.0 | 0.6 |
+   | ≤9 | 9.0 | 0.5 |
+   | ≤15 | 10.0 | 0.5 |
+   | >15 | 12.0 | 0.5 |
+
+6. 实体加权：查询实体去重（最多 8 个），批量编码后逐个查实体库，每个 `top_k=500`，4 个线程并行。相似度 `>= 0.5` 的命中按下列公式给关联记忆加权：
+
+   ```
+   memory_count_weight = 1 / (1 + 0.001 * (n - 1)^2)   # n 为 linked_memory_ids 条数
+   boost = similarity * 0.5 * memory_count_weight        # ENTITY_BOOST_WEIGHT = 0.5
+   ```
+
+   每个记忆取所有实体给出的最大值，范围 `[0, 0.5]`。
+
+7. 组候选集：候选只来自语义检索结果，过期记忆（除非 `show_expired`）跳过。
+8. 打分排序：`score_and_rank`。先用 `threshold` 卡语义分，语义分不达标直接丢弃；再相加融合：
+
+   ```
+   raw_combined = semantic + bm25 + entity_boost
+   combined = min(raw_combined / max_possible, 1.0)
+   ```
+
+   `max_possible` 按启用的信号数调整：
+
+   | 启用信号 | max_possible |
+   |----------|--------------|
+   | 仅语义 | 1.0 |
+   | 语义 + 关键词 | 2.0 |
+   | 语义 + 实体 | 1.5 |
+   | 语义 + 关键词 + 实体 | 2.5 |
+
+   按 `combined` 从高到低排序，取 `top_k`。
+
+9. 组装结果：转成 `MemoryItem`，`memory` 取载荷里的 `data`，带 `hash`、`created_at`、`updated_at`、`score`；把 `user_id`、`agent_id`、`run_id`、`actor_id`、`role`、`attributed_to`、`expiration_date` 提到顶层，其余载荷归入 `metadata`。
+
+候选池由语义检索决定，关键词与实体两路只对池内候选重新打分，不会引入池外新候选；语义检索多取 `max(top_k*4, 60)` 就是为了给这两路留出重排空间。
+
+`rerank=True` 且配置了重排序器时，对结果再精排一次，失败则回退原顺序。`explain=True` 时每条结果附带 `score_details`，含 `semantic_score`、`bm25_score`、`entity_boost`、`raw_score`、`max_possible_score`、`final_score`、`threshold`。
+
+## 返回结果形式
+
+`search` 返回 `{"results": [...]}`，每个元素是 `MemoryItem`，再加从载荷提升到顶层的字段：
+
+| 字段 | 含义 |
+|------|------|
+| `id` | 记忆 id |
+| `memory` | 记忆正文，取自载荷的 `data` |
+| `hash` | 正文的 md5，用于去重 |
+| `score` | 融合后的最终分数 |
+| `created_at` / `updated_at` | 时间戳 |
+| `metadata` | 其余载荷字段 |
+| `user_id` / `agent_id` / `run_id` / `actor_id` / `role` / `attributed_to` / `expiration_date` | 从载荷提升到顶层的字段 |
+| `score_details` | 仅在 `explain=True` 时出现 |
+
+示例：
+
+```json
+{
+  "results": [
+    {
+      "id": "mem_002",
+      "memory": "User moved from Austin to Seattle",
+      "hash": "9f2c1a...",
+      "score": 0.684,
+      "created_at": "2026-10-05T10:00:02Z",
+      "updated_at": "2026-10-05T10:00:02Z",
+      "user_id": "alice",
+      "metadata": { "category": "location" },
+      "score_details": {
+        "semantic_score": 0.57,
+        "bm25_score": 0.83,
+        "entity_boost": 0.31,
+        "raw_score": 1.71,
+        "max_possible_score": 2.5,
+        "final_score": 0.684,
+        "threshold": 0.1
+      }
+    }
+  ]
+}
+```
 
 ## 写入与读取时机
 
