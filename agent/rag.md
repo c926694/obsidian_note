@@ -380,6 +380,117 @@ async function compressContext(question: string, chunk: string): Promise<string 
 }
 ```
 
+## 10. Agentic RAG（智能体检索）
+
+传统 RAG 是一条固定流水线，每次提问都执行同样的一次检索与生成。Agentic RAG 把检索封装成智能体可调用的工具，由大语言模型自主决定是否检索、检索什么、检索几次，并对答案进行审核与纠错。
+
+检索流程：
+
+```mermaid
+flowchart LR
+    Q[用户问题] --> P[智能体判断]
+    P --> D{信息够用吗}
+    D -- 不够 --> R[调用检索工具]
+    R --> P
+    D -- 够用 --> G[生成答案]
+    G --> C{审核通过吗}
+    C -- 不通过 --> R
+    C -- 通过 --> O[返回答案]
+```
+
+### 判断与检索循环
+
+智能体每一步先判断已有片段是否足以回答问题。不足则产出一个检索查询，调用检索工具补充片段；足够则产出答案。
+
+```ts
+type Action =
+  | { action: "retrieve"; query: string }
+  | { action: "answer"; answer: string };
+
+// 判断当前信息是否足够，决定继续检索还是给出答案
+async function decide(question: string, fragments: string[]): Promise<Action> {
+  const response = await chatCompletion([
+    {
+      role: "system",
+      content:
+        "你是 RAG 智能体。根据已有片段判断能否回答问题。" +
+        '信息不足时输出 {"action":"retrieve","query":"检索查询"}；' +
+        '信息足够时输出 {"action":"answer","answer":"答案"}。只输出 JSON。',
+    },
+    { role: "user", content: `问题：${question}\n\n已有片段：\n${fragments.join("\n")}` },
+  ]);
+  return JSON.parse(response) as Action;
+}
+```
+
+### 答案审核
+
+生成答案后由审核环节检查是否切题、是否忠于片段。不通过时给出一个补充检索查询，回到检索循环。
+
+```ts
+interface ReviewResult {
+  approved: boolean;
+  followup: string;
+}
+
+// 审核答案，不通过时给出补充检索查询
+async function review(
+  question: string,
+  fragments: string[],
+  answer: string,
+): Promise<ReviewResult> {
+  const response = await chatCompletion([
+    {
+      role: "system",
+      content:
+        "审核答案是否切题、是否忠于给定片段。" +
+        '通过时输出 {"approved":true,"followup":""}；' +
+        '不通过时输出 {"approved":false,"followup":"补充检索的查询"}。只输出 JSON。',
+    },
+    {
+      role: "user",
+      content: `问题：${question}\n\n片段：\n${fragments.join("\n")}\n\n答案：${answer}`,
+    },
+  ]);
+  return JSON.parse(response) as ReviewResult;
+}
+```
+
+### 智能体主循环
+
+把判断、检索、生成、审核串成一个带轮次上限的循环，避免无限往返。
+
+```ts
+async function agenticRag(question: string, maxRounds = 4): Promise<string> {
+  const fragments: string[] = [];
+
+  for (let round = 0; round < maxRounds; round++) {
+    const action = await decide(question, fragments);
+
+    if (action.action === "retrieve") {
+      const hits = await hybridSearch(action.query);
+      fragments.push(...hits.map((item) => item.text));
+      continue;
+    }
+
+    const reviewResult = await review(question, fragments, action.answer);
+    if (reviewResult.approved) {
+      return action.answer;
+    }
+
+    // 审核不通过，按补充查询再检索一轮
+    const hits = await hybridSearch(reviewResult.followup);
+    fragments.push(...hits.map((item) => item.text));
+  }
+
+  // 达到轮次上限，依据已有片段做兜底生成
+  return chatCompletion([
+    { role: "system", content: "只能依据给定片段回答问题，不得凭空推断。" },
+    { role: "user", content: `问题：${question}\n\n片段：\n${fragments.join("\n")}` },
+  ]);
+}
+```
+
 # 生产环境常用组合
 
 ```mermaid
@@ -412,17 +523,3 @@ RAG 让模型访问外部最新或私有知识；微调改变模型的行为方�
 - 无关内容误导：召回噪声片段导致模型跑题。
 - 上下文截断：片段过长被截断，丢失关键信息。
 - 上下文窗口限制：长文档下召回数量与长度受限制。
-
-```mermaid
-flowchart LR
-    Q[用户问题] --> A[智能体规划]
-    A --> D{需要检索吗}
-    D -- 是 --> R[调用检索工具]
-    R --> E[评估结果]
-    E -- 不充分 --> A
-    E -- 充分 --> G[生成答案]
-    D -- 否 --> G
-    G --> H{答案可靠吗}
-    H -- 否 --> A
-    H -- 是 --> O[返回答案]
-```
