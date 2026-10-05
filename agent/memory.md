@@ -184,25 +184,30 @@ flowchart LR
 ```mermaid
 flowchart TD
     A["入参 query / filters / threshold / top_k"] --> B["校验 filters 必须含 user_id / agent_id / run_id"]
-    B --> C["预处理 lemmatize_for_bm25 + extract_entities"]
-    C --> D["编码查询向量"]
-    D --> E["语义检索 记忆集合 internal_limit = max(top_k * 4, 60)"]
-    E --> F["关键词检索 记忆集合 keyword_search"]
-    E --> H["实体加权 实体集合 向量比对 top_k=500 相似度 >= 0.5"]
-    F --> G["归一化 BM25 到 0 到 1"]
-    H --> I["boost = similarity * 0.5 * memory_count_weight"]
-    E --> J["组候选集 只取语义结果 跳过过期记忆"]
-    J --> K{语义分 >= threshold}
+    B --> C["预处理 词形还原 + spaCy 抽实体"]
+    B --> D["query 编码成向量"]
+    subgraph MEM["记忆集合 默认 mem0"]
+        E["语义相似度 取 n = max(top_k * 4, 60) 条候选"]
+        F["关键词 BM25 对 text_lemmatized"]
+    end
+    subgraph ENT["实体集合 默认 mem0_entities"]
+        G["query 实体向量相似度 top_k=500 相似度 >= 0.5"]
+    end
+    D --> E
+    C --> F
+    C --> G
+    G --> H["读 linked_memory_ids 算 boost = similarity * 0.5 * memory_count_weight"]
+    E --> K{每条候选语义分 >= threshold}
     K -- 否 --> X["丢弃"]
-    K -- 是 --> L["combined = min((semantic + bm25 + boost) / max_possible, 1)"]
-    G --> L
-    I --> L
-    L --> M["按 combined 降序取 top_k"]
-    M --> N{rerank 且配置了重排序器}
-    N -- 是 --> O["交叉编码器精排"]
-    N -- 否 --> P["组装 MemoryItem"]
-    O --> P
-    P --> Q["返回 results"]
+    K -- 是 --> J["融合 combined = min((semantic + bm25 + boost) / max_possible, 1)"]
+    F --> J
+    H --> J
+    J --> L["按 combined 降序取 top_k"]
+    L --> M{rerank 且配置了重排序器}
+    M -- 是 --> N["交叉编码器精排"]
+    M -- 否 --> O["组装 MemoryItem"]
+    N --> O
+    O --> P["返回 results"]
 ```
 
 图中两个集合都在同一个向量库提供方里，默认是 Qdrant：语义与关键词查记忆集合 `mem0`，实体加权查实体集合 `mem0_entities`。SQL 不参与检索。
