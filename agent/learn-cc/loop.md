@@ -1,142 +1,220 @@
 # Agent 主循环（Loop）模块
 
-Claude Code 的 agent 主循环由 `query()`（`src/query.ts`）及其周边模块组成：一个 `while (true)` 无限循环反复执行「调用模型 → 流式消费事件 → 判定工具调用 → 执行工具 → 回填结果 → 继续下一轮」，直到命中某个停止条件并返回 `Terminal`。`QueryEngine` 在会话层为每个用户回合调用一次 `query()`，把循环 yield 出来的消息流翻译成 SDK 协议，同时负责 turn 记账、usage 累加、转录与中断。
+## 1 概述
 
-## 1 模块概览
+Claude Code 的 agent 主循环是一条 `while (true)` 无限循环：反复执行「调用模型 → 流式消费事件 → 判定工具调用 → 执行工具 → 回填结果 → 继续下一轮」，直到命中某个停止条件并返回 `Terminal`。
 
-主循环在整体架构中的位置：
+循环对外暴露两条通道：`yield` 输出中间消息（供界面渲染与转录消费），`return` 输出结束原因（供上层映射为结构化结果）。交互式终端与无头 SDK 消费同一条循环；SDK 路径经会话编排器 `QueryEngine` 调用，每个用户回合对应一次循环运行，交互式终端则直接调用并消费消息流。
+
+一个用户回合可能包含多轮循环迭代：模型每输出一次工具调用，harness 执行工具并把结果回填，就构成一次「工具调用回合」，回合结束后进入下一轮迭代；模型不再输出工具调用时，回合进入收尾判定并返回 `Terminal`。回合期间用户中断（Esc 或 Ctrl+C）、模型错误、上下文压缩都会以不同分支进入或结束循环。
+
+「回合」与「迭代」是两个粒度：回合对应一次用户提交（外层由会话层发起），迭代对应循环体的一次完整走查（内层由 `queryLoop` 控制）。一个回合内可以发生零次或多次工具调用迭代，每一次迭代都以「调用模型并观察响应」为起点。
+
+循环运行期间还有两类外部输入会注入当前回合：用户排队的新消息（命令队列）与文件系统变化产生的附件消息。它们在每轮工具执行结束后被收集并追加进本轮结果，随回填一起进入下一轮模型调用。
 
 ```mermaid
 flowchart LR
-    A["用户输入<br/>REPL.tsx:3513 / QueryEngine.ts:688"] --> B["上下文构建<br/>systemPrompt / userContext / systemContext<br/>QueryEngine.ts:298-335"]
-    B --> C["queryLoop 迭代开始<br/>query.ts:460"]
-    C --> D["compaction 预处理<br/>microcompact / autocompact<br/>query.ts:602 / query.ts:652"]
-    D --> E["API 流式调用 deps.callModel<br/>query.ts:899 / claude.ts:1048"]
+    A["用户输入进入消费方"] --> B["构建回合上下文<br/>systemPrompt / userContext / systemContext"]
+    B --> C["循环迭代开始<br/>解构 State"]
+    C --> D["压缩预处理<br/>microcompact → autocompact"]
+    D --> E["流式调用模型<br/>deps.callModel"]
     E --> F{"响应含 tool_use block?"}
-    F -->|"无"| G["停止判定并返回 Terminal<br/>query.ts:1349-1647"]
-    F -->|"有"| H["工具执行 runTools<br/>query.ts:1671"]
-    H --> I["结果回填 toolResults<br/>query.ts:2044"]
+    F -->|"无"| G["停止判定<br/>返回 Terminal"]
+    F -->|"有"| H["执行工具<br/>StreamingToolExecutor / runTools"]
+    H --> I["回填 tool_result<br/>更新 State，进入下一轮"]
     I --> C
-    G --> J["Terminal 联合类型<br/>transitions.ts:1-11"]
 ```
 
-涉及文件清单：
+图中各环节对应的组件：上下文构建发生在会话层（`QueryEngine` 或终端界面）；迭代、压缩判定与停止判定发生在 `queryLoop` 内部；模型调用经依赖注入的 `deps.callModel` 发出；工具执行交给 `StreamingToolExecutor` 或 `runTools`；回填动作把本轮消息追加进 `State.messages` 并整体替换 `State`。
 
-| 文件路径 | 职责 | 关键导出 |
-|---|---|---|
-| `src/query.ts` | 主查询循环：流式消费、工具回合、停止判定、compaction 触发 | `query`、`queryLoop`、`State`、`QueryParams` |
-| `src/QueryEngine.ts` | 会话编排：turn 记账、SDK 消息映射、usage 累加、转录、中断 | `QueryEngine`、`submitMessage`、`ask` |
-| `src/query/config.ts` | 循环入口一次性快照的运行期开关 | `QueryConfig`、`buildQueryConfig` |
-| `src/query/deps.ts` | 循环的 I/O 依赖注入（模型调用、压缩、uuid） | `QueryDeps`、`productionDeps` |
-| `src/query/transitions.ts` | 循环终止原因与继续原因的类型定义 | `Terminal`、`Continue` |
-| `src/query/stopHooks.ts` | Stop hook 执行、阻塞错误收集、中断处理 | `handleStopHooks`、`StopHookResult` |
-| `src/query/tokenBudget.ts` | 单 turn token 预算判定与递减收益检测 | `createBudgetTracker`、`checkTokenBudget` |
-| `src/services/api/claude.ts` | API 客户端：请求构建、`BetaRawMessageStreamEvent` 处理、非流式回退 | `queryModelWithStreaming`、`queryModelWithoutStreaming` |
-| `src/services/api/withRetry.ts` | 重试循环、指数退避、模型回退信号 | `withRetry`、`FallbackTriggeredError`、`CannotRetryError` |
-| `src/services/compact/autoCompact.ts` | 自动压缩阈值计算与触发、失败熔断 | `autoCompactIfNeeded`、`shouldAutoCompact`、`getAutoCompactThreshold` |
-| `src/services/compact/microCompact.ts` | 工具结果级别的轻量压缩（内容清除） | `microcompactMessages` |
-| `src/services/compact/prompt.ts` | 压缩提示词模板与摘要格式化 | `getCompactPrompt`、`getPartialCompactPrompt`、`formatCompactSummary` |
-| `src/screens/REPL.tsx` | 终端交互层：Escape/Ctrl+C 取消、权限弹窗、事件消费 | （React/Ink 组件） |
-| `src/hooks/useCancelRequest.ts` | 取消键位绑定与取消优先级 | `useCancelRequest` |
+## 2 核心组件与职责
 
-## 2 核心概念
+### 2.1 分层：会话编排层与纯循环层
 
-### 2.1 单轮 loop 的流式增量处理
+`query()` 是纯 API 循环，形态是 `AsyncGenerator`。循环内部只关心消息数组、工具执行与停止判定，一切结果经 `yield` 输出，自身不依赖任何界面框架；所需的界面状态经 `toolUseContext.getAppState()` 回调按需读取。
 
-**概念定义**：模型输出以 `BetaRawMessageStreamEvent` 事件流到达。`claude.ts` 按事件类型把增量累积成完整 content block：`content_block_start` 建立骨架（`tool_use` 的 `input` 初始化为空字符串、`text` 初始化为空、`thinking` 同时初始化 `signature` 为空），`content_block_delta` 逐段拼接，`content_block_stop` 时合并出完整的 `AssistantMessage` 并立即 yield。`query.ts` 逐条转手 yield 给上层，UI 与转录随之更新。
+`QueryEngine` 是会话编排器，每个会话一个实例。它持有 `mutableMessages`（跨回合消息历史）、`abortController`（中断信号）、usage 累计与权限拒绝记录；把循环产出的消息流翻译成 SDK 协议消息；提供回合边界（`submitMessage`）与中断入口（`interrupt`）。turn 记账、usage 累加、转录等会话级职责都在这一层。
 
-**设计动机**：每个 block 完成即可让 UI 显示，无需等待整条响应结束；同时放弃 SDK 的 `BetaMessageStream`，改用原始 `Stream` 自行累积，避免 SDK 在每个 `input_json_delta` 上做 partial JSON 解析造成 O(n²) 开销。
+数据与控制权的传递路径：上层构建参数 → `query()` 启动循环 → 循环 `yield` 中间消息 → 上层逐条消费并渲染 → 循环 `return` 一个 `Terminal` → 上层把结束原因映射为结构化结果。循环与消费方之间只有消息流与结束原因两个接口。
 
-**代码证据**：
+会话层向循环传递的核心对象是 `toolUseContext`：它携带工具列表、权限判定函数 `canUseTool`、abort 信号、`getAppState`/`setAppState` 回调、MCP 连接与代理定义。循环内部调用模型、执行工具、询问权限时都从这一个对象取值，上层切换状态无需改动循环代码。
 
-- `claude.ts:1914-1917` 注释说明使用 raw stream 的原因：
-  ```ts
-  // Use raw stream instead of BetaMessageStream to avoid O(n²) partial JSON parsing
-  // BetaMessageStream calls partialParse() on every input_json_delta, which we don't need
-  // since we handle tool input accumulation ourselves
-  ```
-- `claude.ts:2091-2098`：`content_block_start` 遇到 `tool_use` 时写入 `{ ...part.content_block, input: '' }`，为后续 JSON 字符串累积做准备。
-- `claude.ts:2209`：`input_json_delta` 分支执行 `contentBlock.input += delta.partial_json`。
-- `claude.ts:2223`：`text_delta` 分支执行 `textDeltas.get(part.index)?.push(delta.text!)`，文本增量先入数组。
-- `claude.ts:2291-2296`：`content_block_stop` 时用 `deltas.join('')` 一次性合并文本（O(n) join，替代 O(n²) 的逐段 +=）。
-- `claude.ts:2335-2354`：`message_delta` 携带最终 `usage` 与 `stop_reason`，代码直接修改已 yield 消息的属性（`lastMsg.message.usage = usage`），因为转录写队列持有 `message.message` 的引用，对象替换会断开该引用。
-- `query.ts:1076-1078`：循环把每条消息原样 `yield yieldMessage`；`query.ts:1083-1093` 同时把 `tool_use` block 收进 `toolUseBlocks` 并置 `needsFollowUp = true`。
-- `QueryEngine.ts:813-848`：上层消费 `stream_event` 类型消息，在 `message_start`/`message_delta` 时更新 usage，在 `message_stop` 时把单条消息 usage 累加进 `totalUsage`。
+两种消费方的差异只体现在消息流的下游：交互式终端把每条消息转成界面渲染与转录记录；`QueryEngine` 把消息映射成 SDK 协议消息（如把工具结果映射为 SDK 工具结果事件、把压缩边界映射为 SDK 压缩事件），并把 `Terminal` 映射为 SDK 的 result 消息。循环本身对这两种下游一无所知。
 
-### 2.2 工具调用回合
+```mermaid
+flowchart TB
+    subgraph C["消费方"]
+        R["交互式终端 REPL"]
+        S["无头 SDK"]
+    end
+    subgraph E["会话编排层 QueryEngine（SDK 路径）"]
+        E1["mutableMessages · abortController<br/>usage 与权限记账"]
+        E2["submitMessage / interrupt<br/>回合边界与中断入口"]
+    end
+    subgraph L["纯循环层 query() / queryLoop"]
+        L1["while(true) 迭代：调模型 → 判工具 → 执行 → 回填"]
+        L2["State · Terminal / Continue · deps 注入"]
+    end
+    subgraph X["执行与 I/O"]
+        X1["工具执行<br/>StreamingToolExecutor / runTools"]
+        X2["模型调用与压缩<br/>deps.callModel / microcompact / autocompact"]
+    end
+    R -->|"直接调用并消费消息流"| L
+    S --> E
+    E -->|"构建参数并调用"| L
+    L -->|"yield 消息 / return Terminal"| R
+    L -->|"yield 消息 / return Terminal"| E
+    L --> X1
+    L --> X2
+```
 
-**概念定义**：当模型输出 `tool_use` content block 时，harness 通过 `canUseTool` 完成权限判定后执行工具；工具结果以 `tool_result` 形式放进 user 消息回填进 `messages`；状态对象更新后 `continue` 进入下一轮 API 调用。这一「模型停在 tool_use → 执行 → 回填 → 再调 API」的过程就是一个工具调用回合。
+### 2.2 queryLoop 与 State：循环体与跨轮次状态
 
-**设计动机**：官方文档提示 `stop_reason === 'tool_use'` 并不可靠。源码选择自己维护状态：流中出现任意 `tool_use` block 即置 `needsFollowUp = true`，流结束后该布尔是循环继续的唯一信号。
+`queryLoop` 是无限循环体。每轮开头解构 `State`，让 `messages`、`turnCount` 等字段以裸名参与本轮计算；所有继续点统一写回 `state = { ... }` 完成整体替换，避免分散的独立赋值。
 
-**代码证据**：
+`State` 保存跨轮次可变数据，各字段职责：
 
-- `query.ts:749-756`：每轮迭代重建的局部累积数组与注释原文：
-  ```ts
-  const assistantMessages: AssistantMessage[] = []
-  const toolResults: (UserMessage | AttachmentMessage)[] = []
-  // @see https://docs.claude.com/en/docs/build-with-claude/tool-use
-  // Note: stop_reason === 'tool_use' is unreliable -- it's not always set correctly.
-  // Set during streaming whenever a tool_use block arrives — the sole
-  // loop-exit signal. If false after streaming, we're done (modulo stop-hook retry).
-  const toolUseBlocks: ToolUseBlock[] = []
-  let needsFollowUp = false
-  ```
-- `query.ts:1083-1093`：`assistantMessages.push(...)` 之后过滤 `tool_use` block，`toolUseBlocks.push(...msgToolUseBlocks)` 并置 `needsFollowUp = true`。
-- `query.ts:1669-1689`：流式工具执行开启时用 `streamingToolExecutor.getRemainingResults()`，否则用 `runTools(toolUseBlocks, assistantMessages, canUseTool, toolUseContext)`；`for await (const update of toolUpdates)` 中每条 `update.message` 先 yield 给 UI，再经 `normalizeMessagesForAPI` 过滤后收进 `toolResults`（只保留 `user` 类型）。
-- `query.ts:2043-2054`：本轮结束时 `messages: messagesForQuery.concat(assistantMessages, toolResults)`，`turnCount` 加一后 `state = next`，回到 `while (true)` 迭代开头——回填动作发生在这里。
-- `claude.ts:2093-2098` 与 `claude.ts:2209`：`tool_use` 的 `input` 从空字符串开始逐段累积 `partial_json`，直到 `content_block_stop` 时才作为完整 block 进入 `AssistantMessage`。
-- `QueryEngine.ts:768-770`：编排层每遇到一条 user 消息（含 `tool_result` 回填消息）执行 `turnCount++`。
+- `messages`：消息历史，每轮回填后增长，压缩后替换为摘要版；
+- `toolUseContext`：上文所述的会话上下文对象，工具执行可能改写它（如刷新工具表）；
+- `turnCount`：轮次计数，配合 `maxTurns` 判定轮次上限；
+- `autoCompactTracking`：自动压缩记账（是否已压缩、连续失败次数、轮次编号），驱动压缩熔断；
+- `transition`：上一轮继续原因（`Continue` 联合类型），供测试与审计；
+- `maxOutputTokensRecoveryCount`、`hasAttemptedReactiveCompact`：恢复类计数，在每轮工具回填点重置，语义是「单轮内有效」，新一轮工具回合重新获得恢复机会。
 
-### 2.3 停止条件与中断
+循环参数（`systemPrompt`、`canUseTool`、`maxTurns` 等）在循环内不再赋值，与 `State` 形成「不可变参数 + 可变状态」的分界：参数决定循环如何运行，状态记录循环运行到哪一步。
 
-**概念定义**：循环的所有退出路径统一收敛为 `Terminal` 可辨识联合类型（`src/query/transitions.ts:1-11`），包括 `completed`、`blocking_limit`、`image_error`、`model_error`、`aborted_streaming`、`aborted_tools`、`prompt_too_long`、`stop_hook_prevented`、`hook_stopped`、`max_turns`。用户中断（Escape/Ctrl+C）由 REPL 层调用 `abortController.abort('user-cancel')`，信号沿 `deps.callModel` 原样传递给 API 客户端，SDK 抛出 `APIUserAbortError`，循环在流结束后检查 `signal.aborted` 走中断分支。
+**State 容器：跨轮次可变状态的形状**
 
-**设计动机**：把「为什么结束」建模为带原因的联合类型，上层（`QueryEngine`）能据此映射出结构化的 SDK `result` 消息（例如 `max_turns_reached` attachment 映射为 `error_max_turns`，见 `QueryEngine.ts:885-918`）。
+```ts
+let state: State = {
+  messages,
+  toolUseContext,
+  maxOutputTokensOverride,
+  autoCompactTracking: undefined,
+  stopHookActive: undefined,
+  maxOutputTokensRecoveryCount: 0,
+  hasAttemptedReactiveCompact: false,
+  turnCount: 1,
+  pendingToolUseSummary: undefined,
+  transition: undefined,
+}
+```
 
-**代码证据**：
+### 2.3 deps：依赖注入边界
 
-- `src/query/transitions.ts:1-11`：`Terminal` 的完整定义（见第 4 节摘录）。
-- `REPL.tsx:2626` 与 `REPL.tsx:2631`：取消路径执行 `abortController?.abort('user-cancel')`；权限弹窗打开时（`focusedInputDialog === 'tool-permission'`）调用 `toolUseConfirmQueue[0]?.onAbort()`（`REPL.tsx:2616-2619`）；提交式中断使用 `abort('interrupt')`（`REPL.tsx:5206`）。
-- `useCancelRequest.ts:129`：`canCancelRunningTask = abortSignal !== undefined && !abortSignal.aborted`；`useCancelRequest.ts:164-167` 绑定 `chat:cancel`（Escape）键位，`useCancelRequest.ts:217-218` 绑定 `app:interrupt`（Ctrl+C）键位。
-- `claude.ts:2553-2581`：捕获 `APIUserAbortError` 后先查 `signal.aborted`——为真表示用户按了 Escape，原样重新抛出；为假表示 SDK 内部超时，抛出更具体的 `APIConnectionTimeoutError`。
-- `query.ts:1302-1339`：流结束后第一个判定就是 `toolUseContext.abortController.signal.aborted`；为真时用 `streamingToolExecutor.getRemainingResults()` 或 `yieldMissingToolResultBlocks` 补足缺失的 `tool_result`，随后返回 `{ reason: 'aborted_streaming' }`。`reason === 'interrupt'` 时跳过中断消息，因为排队中的新用户消息已提供上下文（`query.ts:1333-1337`）。
-- `query.ts:1779-1810`：工具执行期间被中断时返回 `{ reason: 'aborted_tools' }`，并在返回前检查 maxTurns。
-- `query.ts:2032-2040`：`maxTurns && nextTurnCount > maxTurns` 时 yield `max_turns_reached` attachment 并返回 `{ reason: 'max_turns', turnCount }`。
-- `QueryEngine.ts:1217-1219`：SDK 路径的入口 `interrupt()` 只做一件事：`this.abortController.abort()`；`QueryEngine.ts:1223-1225` 的 `resetAbortController()` 为下一次 `submitMessage` 建立新的未中止信号。
+`deps` 收敛四个 I/O 依赖：`callModel`（模型调用）、`microcompact`（微压缩）、`autocompact`（自动压缩）、`uuid`（标识生成）。生产环境用 `productionDeps()` 填充真实实现；测试注入替代实现即可替换模型调用与压缩行为，循环其余代码保持不变。
 
-### 2.4 compaction（上下文压缩）
+把压缩函数也放进依赖对象有两层考虑：压缩本身需要发起模型调用（摘要生成），属于外部 I/O；测试需要在不真正调用模型的情况下验证压缩触发逻辑。依赖注入让「循环逻辑」与「外部 I/O」的分界清晰：循环只依赖接口，不依赖具体实现。
 
-**概念定义**：上下文接近窗口上限时的压缩机制，分三个层次：`microcompact`（`microcompactMessages`，清除 Read/Bash/Grep/Glob/WebSearch/WebFetch/Edit/Write 等工具的历史结果内容，占位文本常量见 `microCompact.ts:36`）、`autocompact`（`autoCompactIfNeeded`，让模型生成摘要，用摘要消息替换整段历史，产出 `compact_boundary` 消息）、`reactiveCompact`（API 返回 413 prompt-too-long 之后被动触发）。压缩完成后循环用 `buildPostCompactMessages` 生成的新消息数组继续。
+### 2.4 工具执行：StreamingToolExecutor 与 runTools
 
-**设计动机**：主循环只负责「判定要不要压缩」与「替换 messages 继续跑」，压缩的具体实现（提示词、会话记忆压缩、事后清理）全部隔离在 `services/compact/` 目录；微压缩与自动压缩按顺序组合（先微压缩、再自动压缩），且微压缩只按 `tool_use_id` 操作、不读内容，与工具结果预算的替换逻辑可以干净组合。
+工具执行有两条路径，由运行期开关选择：
 
-**代码证据**：
+- `StreamingToolExecutor`（流式执行器）：`tool_use` block 随模型流到达立即入队调度，工具在模型继续输出期间就开始执行。入队时用输入 schema 校验结果与 `isConcurrencySafe(input)` 预先计算并发性：并发安全工具可并行执行，非并发安全工具独占执行并阻塞后续工具；结果按到达顺序产出，进度消息立即转发。流被中断时，执行器为排队中的工具产出合成的中断结果，保证每个 `tool_use` 都有对应的 `tool_result`。
+- `runTools`（批量执行）：流结束后拿到完整 `toolUseBlocks` 列表再逐个执行，逻辑更直白，但没有流式提前执行的收益。
 
-- `query.ts:602-606`：每轮 API 调用之前先执行 `deps.microcompact(messagesForQuery, toolUseContext, querySource)`。
-- `query.ts:652-733`：`deps.autocompact(...)` 返回 `compactionResult` 后，执行 `buildPostCompactMessages(compactionResult)`，把新消息逐条 yield（`query.ts:728-730`），再执行 `messagesForQuery = postCompactMessages`（`query.ts:733`）继续当前查询。
-- `autoCompact.ts:33-49`：`getEffectiveContextWindowSize` = 模型上下文窗口减去为摘要输出保留的 `MAX_OUTPUT_TOKENS_FOR_SUMMARY`（20000 token，见 `autoCompact.ts:28-30`）。
-- `autoCompact.ts:62`：`AUTOCOMPACT_BUFFER_TOKENS = 13_000`；`autoCompact.ts:77-82` 按窗口大小分级：有效窗口 ≥ 800K 用 50K 缓冲、≥ 400K 用 30K、其余用 13K。
-- `autoCompact.ts:101-120`：`getAutoCompactThreshold` = 有效窗口 - 缓冲；`shouldAutoCompact`（`autoCompact.ts:189-268`）用 `tokenCountWithEstimation(messages) - snipTokensFreed` 与该阈值比较。
-- `autoCompact.ts:289-294`：连续失败熔断——`tracking.consecutiveFailures >= MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES`（值为 3，见 `autoCompact.ts:99`）时直接跳过本轮压缩；失败计数在 `autoCompact.ts:363-379` 累加并在成功时重置（`autoCompact.ts:361`）。
-- `microCompact.ts:41-50`：`COMPACTABLE_TOOLS` 白名单限定可压缩的工具。
-- `prompt.ts:294-304`：`getCompactPrompt` 用 `NO_TOOLS_PREAMBLE` + `BASE_COMPACT_PROMPT` + `NO_TOOLS_TRAILER` 组成摘要请求，禁止模型在压缩回合调用工具；`formatCompactSummary`（`prompt.ts:312-336`）在摘要进入上下文前剥除 `<analysis>` 草稿区。
-- `QueryEngine.ts:958-971`：编排层收到 `compact_boundary` 消息后，把边界之前的历史从 `mutableMessages` 中 `splice` 掉，只保留压缩边界及之后的消息，供下一回合使用。
+两条路径通过统一的更新协议回填结果，循环主体不感知差异。权限函数 `canUseTool` 从循环参数一路传入执行器，工具执行期间的权限询问与界面确认队列都经它触发；用户中断时界面直接终止确认队列中的等待项。
 
-### 2.5 QueryEngine 与 query() 的分层
+并发调度的语义细节：并发安全性由「输入」决定，同一个工具在不同输入下可能给出不同判定（例如只读命令并发安全、写命令独占）。调度器维护「正在执行」集合，只有全部在执行工具都并发安全时才放行新的并发安全工具；任何一个非并发安全工具在执行时，后续工具一律排队。这份规则把「模型并行调用多个工具」约束成可预测的执行顺序。
 
-**概念定义**：`query()` 是纯 API 循环——一个 `AsyncGenerator`，循环内部只关心消息数组、工具执行与停止判定，一切结果通过 yield 输出，自身不 import React、不触碰 UI。`QueryEngine` 是会话编排器——每个会话一个实例（`QueryEngine.ts:183-191` 注释），持有 `mutableMessages`、`abortController`、`totalUsage`、权限拒绝记录，把 `query()` 的消息流翻译成 SDK 协议消息，并做 turn 记账、转录与 usage 累加。
+### 2.5 Terminal 与 Continue：结束与继续的联合类型
 
-**设计动机**：把「纯 API 循环」与「会话编排」分成两层之后，同一条循环可以同时服务交互式 REPL 与无头 SDK 两种消费方——`REPL.tsx:3513-3523` 直接调用 `query()`，`QueryEngine.ts:688-699` 也调用同一个 `query()`。循环所需的 UI 状态通过 `toolUseContext.getAppState()` 回调按需读取（`query.ts:768`、`query.ts:906-909`），循环本身保持无 UI 依赖。
+循环的所有退出路径统一收敛为 `Terminal` 可辨识联合类型；循环内部的重试路径统一收敛为 `Continue` 联合类型。两个类型把所有「为什么结束」「为什么继续」的原因变成可枚举、可测试、可审计的字段。
 
-**代码证据**：
+`QueryEngine` 消费 `Terminal` 后把它映射为结构化的 SDK 结果：例如 `max_turns` 映射为轮次上限错误，`aborted_*` 映射为中断结果，`completed` 映射为正常完成。`Continue` 主要供测试断言恢复路径是否触发，也供运行期日志记录上一轮为何继续。
 
-- `QueryEngine.ts:183-191` 注释：`One QueryEngine per conversation. Each submitMessage() call starts a new turn within the same conversation.` 状态（messages、file cache、usage）跨回合持久。
-- `QueryEngine.ts:688-699`：`for await (const message of query({...}))` 消费循环产出。
-- `QueryEngine.ts:253-281`：`wrappedCanUseTool` 包裹用户提供的 `canUseTool`，在权限拒绝时记录 `permissionDenials`（`QueryEngine.ts:271-278`）——编排层特有的记账，循环内部并不感知。
-- `QueryEngine.ts:670-686`：turn 级局部变量（`currentMessageUsage`、`turnCount`、`lastStopReason`）在每次 `submitMessage` 重置。
-- `query.ts:899-949`：`deps.callModel` 的 options 全部来自 `toolUseContext`（含 `getToolPermissionContext`、`abortController.signal` 原样传递），query.ts 自身没有 UI 类型依赖。
-- `REPL.tsx:3513-3523`：交互式路径直接 `for await (const event of query({...}))`，说明循环与终端 UI 之间只隔一层事件流。
+**Terminal 与 Continue：结束原因与继续原因的联合类型**
+
+```ts
+export type Terminal =
+  | { reason: 'completed' }
+  | { reason: 'blocking_limit' }
+  | { reason: 'image_error' }
+  | { reason: 'model_error'; error?: unknown }
+  | { reason: 'aborted_streaming' }
+  | { reason: 'aborted_tools' }
+  | { reason: 'prompt_too_long' }
+  | { reason: 'stop_hook_prevented' }
+  | { reason: 'hook_stopped' }
+  | { reason: 'max_turns'; turnCount: number }
+
+export type Continue =
+  | { reason: 'collapse_drain_retry'; committed: number }
+  | { reason: 'reactive_compact_retry' }
+  | { reason: 'max_output_tokens_escalate' }
+  | { reason: 'max_output_tokens_recovery'; attempt: number }
+  | { reason: 'stop_hook_blocking' }
+  | { reason: 'token_budget_continuation' }
+  | { reason: 'next_turn' }
+```
+
+`Terminal` 各分支含义：
+
+- `completed`：模型未输出工具调用，且全部收尾判定通过，正常结束。
+- `blocking_limit`：上下文达到硬上限且自动压缩关闭，为手动压缩保留空间。
+- `image_error`：图像尺寸或缩放错误。
+- `model_error`：模型调用异常，携带原始错误对象。
+- `aborted_streaming`：流式输出期间用户中断。
+- `aborted_tools`：工具执行期间用户中断。
+- `prompt_too_long`：请求超长（413），且恢复路径耗尽。
+- `stop_hook_prevented`：Stop hook 判定阻止继续。
+- `hook_stopped`：工具执行过程中 hook 要求终止。
+- `max_turns`：轮次上限，携带最终轮数。
+
+`Continue` 各分支含义：
+
+- `collapse_drain_retry`：上下文塌缩排水后重试本轮。
+- `reactive_compact_retry`：反应式压缩完成后重试本轮。
+- `max_output_tokens_escalate`：输出上限升级后重试本轮。
+- `max_output_tokens_recovery`：注入「从中断处继续」消息后重试。
+- `stop_hook_blocking`：hook 阻塞错误注入消息历史后重试。
+- `token_budget_continuation`：token 预算未达目标，注入提示消息后续跑。
+- `next_turn`：工具结果回填后进入下一轮调用。
+
+### 2.6 handleStopHooks 与 token budget：收尾判定
+
+`handleStopHooks` 在模型未输出工具调用的回合结束时执行 Stop hooks。它返回两种结果：`preventContinuation`（阻止继续，循环直接终止）与 `blockingErrors`（阻塞错误，注入消息历史后重试）。阻塞重试路径会保留反应式压缩的已尝试标记，防止「压缩 → 仍超限 → 错误 → hook 阻塞 → 压缩」形成无限循环。
+
+hook 与循环的分工：hook 是用户配置的外部脚本，harness 在生命周期点（Stop、SubagentStop 等）执行它们；循环只消费 hook 的返回值并决定终止或重试，hook 本身无法直接控制循环。模型产出错误消息（限流、超长、认证失败）的回合不运行 Stop hooks，避免「错误 → hook 阻塞 → 重试 → 错误」的循环。
+
+token budget 组件在收尾阶段做「续跑还是终止」的判定：用户设定了 token 目标时，消耗低于目标 90% 就注入一条提示消息续跑；连续多轮输出增量过低时判定为递减收益，直接终止。该组件只对主会话生效，子代理不参与。
+
+### 2.7 三层压缩：microcompact / autocompact / reactiveCompact
+
+- `microcompact`（微压缩）：轻量压缩，清除白名单工具的历史结果内容，只按 `tool_use_id` 操作、不读内容；先于自动压缩执行，与工具结果预算的替换逻辑可以组合使用。
+- `autocompact`（自动压缩）：主动压缩，token 估算达到阈值时触发。阈值计算分两级：有效上下文窗口 = 模型窗口减去为摘要输出保留的空间（约 20K token）；压缩阈值 = 有效窗口减去缓冲，缓冲按窗口大小分级（大窗口用 50K，中窗口用 30K，小窗口用 13K）。触发后让模型生成摘要并用摘要消息替换整段历史，产出压缩边界消息。连续失败达到 3 次时熔断跳过。
+- `reactiveCompact`（反应式压缩）：被动压缩，API 返回 413 超长错误后触发，作为主动压缩的兜底。
+
+主循环只负责「判定要不要压缩 → 调用压缩组件 → 替换 messages → 继续」，摘要提示词、会话记忆压缩与压缩后清理都隔离在压缩组件内部。压缩发生时循环先把新消息数组逐条 yield 给界面，再以压缩后的消息继续当前回合。预测性压缩是自动压缩的补充：请求前用「本轮预估增长量」判断本轮结束后是否会越界，越界则先压缩再调用模型，省下一次越界请求。
+
+### 2.8 单轮累积：三个数组与一个布尔
+
+每轮迭代重建四个局部变量，承载「本轮」数据；跨轮次数据在 `State.messages`。两者分界让每轮的职责一目了然。
+
+**单轮累积容器：本轮数据与跨轮次数据的分界**
+
+```ts
+const assistantMessages: AssistantMessage[] = []
+const toolResults: (UserMessage | AttachmentMessage)[] = []
+const toolUseBlocks: ToolUseBlock[] = []
+let needsFollowUp = false
+```
+
+- `assistantMessages` 收本轮模型产出的助手消息；
+- `toolResults` 收工具结果与附件消息；
+- `toolUseBlocks` 收流中出现过的工具调用 block；
+- `needsFollowUp` 决定是否进入下一轮 API 调用。
+
+循环继续的信号由 harness 自己维护：API 的 `stop_reason === 'tool_use'` 不可靠，因此把「流中出现过 tool_use block」作为唯一的循环继续信号，出现即置 `needsFollowUp = true`。
+
+### 2.9 轮次间的消息注入：附件与命令队列
+
+每轮工具执行结束后、进入下一轮之前，循环会把两类外部输入收集进本轮结果：
+
+- **命令队列**：用户在执行期间提交的新消息、排队中的任务通知。循环按优先级取快照，把属于本会话的命令转换成附件消息；斜杠命令不进附件，留给回合结束后的命令处理器。
+- **系统附件**：文件变更通知（工具编辑文件后产生）、记忆预取的命中附件、技能与工具发现的预取附件。这些附件随 `toolResults` 一起回填进 `messages`，模型在下一轮调用中看到它们。
+
+注入流程统一为「取快照 → 过滤归属 → 转成附件消息 → 追加进 toolResults → 回填」。附件消息先 yield 给界面，再进入消息历史。命令队列是进程级共享结构，主会话与子代理各自只取属于自己的条目，避免互相消费。
 
 ## 3 关键流程
 
@@ -144,288 +222,90 @@ flowchart LR
 
 ```mermaid
 sequenceDiagram
-    participant U as 上层（REPL / QueryEngine）
-    participant Q as query.ts queryLoop
-    participant C as claude.ts queryModel
-    participant R as withRetry.ts
-    participant A as Anthropic API
-    participant T as 工具执行 runTools
+    participant U as 消费方（REPL / QueryEngine）
+    participant Q as queryLoop
+    participant C as 模型调用层（callModel + 重试）
+    participant A as 模型 API
+    participant T as 工具执行（runTools / StreamingToolExecutor）
 
-    U->>Q: query(params)（query.ts:276）
-    Q->>C: deps.callModel(...)（query.ts:899）
-    C->>R: withRetry(getClient, operation)（claude.ts:1874）
-    R->>A: messages.create({stream:true})（claude.ts:1917）
-    A-->>C: message_start 与 content_block_start(tool_use)
-    A-->>C: input_json_delta 逐段累积（claude.ts:2209）
-    A-->>C: content_block_stop（claude.ts:2270）
-    C-->>Q: yield AssistantMessage（claude.ts:2316）
-    Q-->>U: yield 同一消息（query.ts:1077）
-    Q->>Q: needsFollowUp = true（query.ts:1092）
-    Q->>T: runTools(toolUseBlocks, ...)（query.ts:1671）
-    T-->>Q: update.message 工具结果（query.ts:1673-1689）
-    Q-->>U: yield 工具结果消息（query.ts:1675）
-    Q->>Q: messages = concat(assistantMessages, toolResults)（query.ts:2044）
-    Q->>C: 下一轮 callModel（携带 tool_result）
+    U->>Q: query(params) 启动回合
+    Q->>C: deps.callModel 发起流式请求（携带 abort 信号）
+    C->>A: 创建流式请求
+    A-->>C: message_start、content_block_start(tool_use)
+    A-->>C: input_json_delta 逐段累积参数
+    A-->>C: content_block_stop 合并出完整消息
+    C-->>Q: yield AssistantMessage（含 tool_use block）
+    Q-->>U: 转手 yield，界面即时渲染
+    Q->>Q: 收进 toolUseBlocks，needsFollowUp = true
+    Q->>T: 执行工具（权限判定之后）
+    T-->>Q: 工具结果消息
+    Q-->>U: yield 工具结果
+    Q->>Q: 回填 messages，整体替换 State
+    Q->>C: 下一轮调用（携带 tool_result）
 ```
 
 分步讲解：
 
-1. **进入循环**：REPL（`REPL.tsx:3513-3523`）或 `QueryEngine.submitMessage`（`QueryEngine.ts:688-699`）调用 `query(params)`；`query()` 做 trace 初始化后把控制权交给 `queryLoop`（`query.ts:320-324`）。
-2. **发起流式请求**：每轮迭代通过 `deps.callModel` 发起调用（`query.ts:899`），实际实现是 `queryModelWithStreaming`（`deps.ts:35`），`signal: toolUseContext.abortController.signal` 把中止信号原样传入（`query.ts:904`）。
-3. **SDK 请求经重试层**：`claude.ts:1874-1941` 用 `withRetry` 包裹 `anthropic.beta.messages.create({...params, stream: true})`；`claude.ts:1944-1952` 逐个取出生成器值，非流对象直接 yield（作为 API 错误消息），最终拿到 `Stream<BetaRawMessageStreamEvent>`。
-4. **事件累积**：`message_start` 记录 `partialMessage`、ttft 与初始 usage（`claude.ts:2076-2089`）；`content_block_start` 为 `tool_use` 建 `input: ''` 骨架（`claude.ts:2093-2098`）；`input_json_delta` 拼接 `delta.partial_json`（`claude.ts:2209`）。
-5. **块完成即产出**：`content_block_stop` 合并文本增量并构造 `AssistantMessage`（`claude.ts:2297-2314`），`yield m` 立刻交给上层（`claude.ts:2316`）；`query.ts:1076-1078` 转手 yield。
-6. **记录工具调用意图**：`query.ts:1083-1093` 过滤 `tool_use` block，收进 `toolUseBlocks` 并置 `needsFollowUp = true`。
-7. **执行工具**：`query.ts:1669-1671` 选择执行路径（流式执行器或 `runTools`）；`query.ts:1673-1689` 消费更新，逐条 yield 并收进 `toolResults`。
-8. **回填与继续**：`query.ts:2043-2054` 构造下一轮 `State`，`messages` 追加 `assistantMessages` 与 `toolResults`，`state = next` 后回到 `while (true)`（`query.ts:460`）的迭代开头。
-9. **回合终止**：模型不再输出 `tool_use` 时进入停止判定（`query.ts:1349`），最终返回 `{ reason: 'completed' }`（`query.ts:1647`）。
+1. **进入循环**：消费方调用 `query(params)` 启动一个用户回合；`query()` 完成观测初始化后把控制权交给 `queryLoop`。
+2. **发起流式请求**：每轮迭代经 `deps.callModel` 发起调用，abort 信号原样传入，界面中断可以直接传导到模型调用。
+3. **重试层包裹**：模型调用层用重试组件包裹请求，网络错误按策略重试；流式事件逐个到达。
+4. **事件累积**：`message_start` 建立消息骨架；`content_block_start` 为 `tool_use` 建立空 `input` 骨架；`input_json_delta` 逐段拼接参数；文本增量先收集进数组，块结束时一次性合并，避免逐段拼接的平方级开销。
+5. **块完成即产出**：`content_block_stop` 把增量合并成完整 `AssistantMessage` 并立即 yield，循环转手 yield 给消费方，界面在整条响应结束前就逐块渲染。
+6. **记录工具调用意图**：循环把 `tool_use` block 收进 `toolUseBlocks` 并置 `needsFollowUp = true`。
+7. **执行工具**：流式执行器或 `runTools` 消费工具调用，逐条产出结果消息；循环先 yield 给界面，再收进 `toolResults`。权限判定发生在执行之前，deny 时产出拒绝结果。
+8. **注入外部输入**：收集命令队列与系统附件（文件变更、记忆预取），追加进 `toolResults`，随回填一起进入下一轮。
+9. **回填与继续**：`messages` 追加本轮 `assistantMessages` 与 `toolResults`，`turnCount` 加一，`State` 整体替换，回到迭代开头。
+10. **回合终止**：模型未再输出工具调用时进入停止判定，最终返回 `completed`。
 
-### 3.2 每轮迭代中的压缩与停止判定
+### 3.2 每轮迭代的压缩与停止判定
 
 ```mermaid
 flowchart TD
-    A["迭代开始，解构 State（query.ts:460-474）"] --> B["autocompact 判定（query.ts:652）"]
-    B -->|"需要压缩"| C["执行压缩、yield 新消息、替换 messagesForQuery（query.ts:726-733）"]
-    C --> D["阻塞上限检查（query.ts:826-846）"]
+    A["迭代开始，解构 State"] --> B["autocompact 判定"]
+    B -->|"需要压缩"| C["执行压缩、yield 新消息、替换 messages"]
+    C --> D["阻塞上限检查"]
     B -->|"不需要压缩"| D
-    D -->|"到达 blocking_limit"| E["返回 blocking_limit（query.ts:844）"]
-    D -->|"未到达"| F["预测性压缩（query.ts:852-888）"]
-    F --> G["流式消费 deps.callModel（query.ts:899）"]
-    G -->|"FallbackTriggeredError"| H["切换 fallbackModel 后 continue（query.ts:1152-1208）"]
-    G -->|"其他异常"| I["返回 model_error（query.ts:1257）"]
-    G -->|"signal.aborted"| J["补 tool_result，返回 aborted_streaming（query.ts:1302-1338）"]
-    G -->|"正常结束"| K{"needsFollowUp?（query.ts:1349）"}
-    K -->|"false"| L["恢复与停止判定：413 恢复 / max_output_tokens 恢复 / stop hook / token budget（query.ts:1357-1645）"]
-    L --> M["返回 completed（query.ts:1647）"]
-    K -->|"true"| N["runTools（query.ts:1671）"]
-    N -->|"工具期间 aborted"| O["返回 aborted_tools（query.ts:1809）"]
-    N -->|"hook 阻止"| P["返回 hook_stopped（query.ts:1814）"]
-    N -->|"正常"| Q["maxTurns 检查（query.ts:2033）"]
-    Q -->|"超限"| R["返回 max_turns（query.ts:2039）"]
-    Q -->|"未超限"| S["State 更新与回填，continue（query.ts:2043-2055）"]
+    D -->|"到达 blocking_limit"| E["返回 blocking_limit"]
+    D -->|"未到达"| F["预测性压缩判定"]
+    F --> G["流式消费 deps.callModel"]
+    G -->|"FallbackTriggeredError"| H["切换 fallbackModel 后重试本轮"]
+    G -->|"其他异常"| I["返回 model_error"]
+    G -->|"signal.aborted"| J["补 tool_result，返回 aborted_streaming"]
+    G -->|"正常结束"| K{"needsFollowUp?"}
+    K -->|"false"| L["恢复与收尾判定：<br/>413 恢复 / 输出上限恢复 / stop hook / token budget"]
+    L --> M["返回 completed"]
+    K -->|"true"| N["执行工具"]
+    N -->|"工具期间中断"| O["返回 aborted_tools"]
+    N -->|"hook 阻止"| P["返回 hook_stopped"]
+    N -->|"正常"| Q{"maxTurns 超限?"}
+    Q -->|"是"| R["返回 max_turns"]
+    Q -->|"否"| S["回填消息、更新 State、进入下一轮"]
     S --> A
 ```
 
 分步讲解：
 
-1. **迭代开始**（`query.ts:460-474`）：`while (true)` 顶部解构 `state`，`messages`、`turnCount` 等以裸名参与本轮计算。
-2. **自动压缩判定**（`query.ts:652-665`）：`deps.autocompact` 内部先查 `shouldAutoCompact`（`autoCompact.ts:297-306`）——token 估算值达到 `getAutoCompactThreshold` 即触发；连续失败达到 3 次时熔断跳过（`autoCompact.ts:289-294`）。压缩成功后 `tracking` 重置（`query.ts:719-724`），新消息数组替换 `messagesForQuery`（`query.ts:733`）。
-3. **阻塞上限**（`query.ts:826-846`）：仅当本轮未压缩、querySource 允许、且自动压缩关闭时才检查 `isAtBlockingLimit`，到达上限则 yield 错误消息并返回 `blocking_limit`，为手动 `/compact` 保留空间。
-4. **预测性压缩**（`query.ts:852-888`）：用 `estimateMaxTurnGrowth`（`autoCompact.ts:88-94`，等于 min(模型最大输出, 20000) 加 15000 token 的工具结果增长估计）预估本轮增长，`currentTokens > effectiveWindow - estimatedGrowth` 时提前压缩。
-5. **流式消费与异常分流**（`query.ts:894-1258`）：`FallbackTriggeredError` 表示重试层要求换模型，循环切 `fallbackModel`、清空本轮累积、`continue` 重试（`query.ts:1152-1208`）；其余异常统一 yield 错误消息并返回 `model_error`（`query.ts:1213-1258`）。
-6. **中断优先**（`query.ts:1302-1338`）：流结束后最先检查 `signal.aborted`，补足缺失的 `tool_result` 后返回 `aborted_streaming`。
-7. **无工具调用的停止判定**（`query.ts:1349-1647`）：依次处理 413 prompt-too-long 恢复（collapse 排水 → reactive compact，`query.ts:1357-1470`）、`max_output_tokens` 恢复（先升级 64K 重试一次，再注入「从中断处继续」的 meta 消息，上限 3 次，`query.ts:1475-1543`）、API 错误提前返回（`query.ts:1549-1555`）、stop hook 的阻塞与阻止（`query.ts:1557-1596`）、token budget 继续或终止（`query.ts:1598-1645`），最后返回 `completed`（`query.ts:1647`）。
-8. **工具执行与回合推进**（`query.ts:1653-2055`）：`runTools` 消费更新（`query.ts:1669-1698`）；工具期间中断返回 `aborted_tools`（`query.ts:1779-1810`）；hook 阻止继续返回 `hook_stopped`（`query.ts:1813-1815`）；maxTurns 超限返回 `max_turns`（`query.ts:2033-2040`）；否则回填 `toolResults` 并 `continue` 下一轮（`query.ts:2043-2055`）。
+1. **迭代开始**：`while (true)` 顶部解构 `State`，各字段以裸名参与本轮计算。
+2. **自动压缩判定**：`deps.autocompact` 内部先查 token 估算值是否达到压缩阈值；达到即压缩。连续失败达到 3 次时熔断跳过。压缩成功后重置压缩记账，新消息数组替换当前消息集。
+3. **阻塞上限检查**：仅当本轮未压缩、且自动压缩关闭时才检查硬上限；到达上限则产出错误消息并返回 `blocking_limit`，为手动压缩保留空间。
+4. **预测性压缩**：用「本轮预估增长量」提前判断本轮结束后是否会越界，越界则先压缩再调用模型，省下一次越界请求。
+5. **流式消费与异常分流**：`FallbackTriggeredError` 表示重试层要求换模型，循环切换备用模型、清空本轮累积后重试；其余异常统一产出错误消息并返回 `model_error`。
+6. **中断优先**：流结束后最先检查 abort 信号；已中断时补足缺失的 `tool_result` 再返回 `aborted_streaming`。中断判定优先于一切错误与恢复逻辑。
+7. **无工具调用的停止判定**：依次处理 413 超长恢复（塌缩排水 → 反应式压缩）、输出上限恢复（先升级上限重试一次，再注入「从中断处继续」消息，重试上限 3 次）、API 错误提前返回、Stop hook 的阻止与阻塞、token budget 的续跑或终止，最后返回 `completed`。每条恢复路径都有次数或条件上限，防止恢复逻辑自身形成无限循环。
+8. **工具执行与回合推进**：执行工具期间中断返回 `aborted_tools`；hook 阻止继续返回 `hook_stopped`；maxTurns 超限返回 `max_turns`；否则回填消息并进入下一轮。
 
-## 4 关键代码精读
+## 4 设计思想
 
-### 4.1 queryLoop 的结构与状态初始化
+**循环与 UI 解耦。** 主循环对外只暴露消息流（yield）与终止原因（return），界面状态经 `getAppState` 回调按需读取。同一循环被交互式终端与无头 SDK 共用，界面层的变化不侵入循环逻辑。迁移要点：把循环写成纯生成器，UI 只是消息流的消费者之一。
 
-`src/query.ts:393-433`：
+**依赖注入以测试为中心。** 四个 I/O 依赖（模型调用、两种压缩、uuid）集中在一个接口对象里，测试注入替代实现即可替换外部行为，免去逐模块打桩的样板。生产工厂用真实实现的类型推导保持签名自动同步。迁移要点：把一切「会发起网络或进程」的动作收敛成少数几个可注入的接口。
 
-```ts
-async function* queryLoop(
-  params: QueryParams,
-  consumedCommandUuids: string[],
-  consumedAutonomyCommands: QueuedCommand[],
-): AsyncGenerator<
-  | StreamEvent
-  | RequestStartEvent
-  | Message
-  | TombstoneMessage
-  | ToolUseSummaryMessage,
-  Terminal
-> {
-  // Immutable params — never reassigned during the query loop.
-  const {
-    systemPrompt,
-    userContext,
-    systemContext,
-    canUseTool,
-    fallbackModel,
-    querySource,
-    maxTurns,
-    skipCacheWrite,
-  } = params
-  const deps = params.deps ?? productionDeps()
+**状态转移显式化。** 跨轮次可变数据集中在一个 `State` 对象里，所有继续点统一整体替换；终止与继续各用可辨识联合类型表达，每个出口原因都可枚举、可测试、可审计。测试可以直接断言 `transition.reason` 验证恢复路径是否触发，无需翻查消息内容。迁移要点：循环体只允许两类出口——带着原因的终止、带着原因的继续。
 
-  // Mutable cross-iteration state. The loop body destructures this at the top
-  // of each iteration so reads stay bare-name (`messages`, `toolUseContext`).
-  // Continue sites write `state = { ... }` instead of 9 separate assignments.
-  let state: State = {
-    messages: params.messages,
-    toolUseContext: params.toolUseContext,
-    maxOutputTokensOverride: params.maxOutputTokensOverride,
-    autoCompactTracking: undefined,
-    stopHookActive: undefined,
-    maxOutputTokensRecoveryCount: 0,
-    hasAttemptedReactiveCompact: false,
-    turnCount: 1,
-    pendingToolUseSummary: undefined,
-    transition: undefined,
-  }
-  const budgetTracker = feature('TOKEN_BUDGET') ? createBudgetTracker() : null
-```
+**停止条件分层与熔断。** 判定顺序固定：中断优先于错误，错误优先于恢复，hook 与 token 预算收尾，最后才是 `completed`。压缩失败用连续失败计数熔断，输出上限恢复限制 3 次，每个恢复路径都有次数或条件上限，防止错误路径自身变成无限循环。迁移要点：每条恢复路径必须自带「最多重试几次」的上限。
 
-讲解：
+**压缩与主循环的分界。** 主循环只做「判定 → 调用 → 替换 messages → 继续」，摘要提示词、会话记忆压缩与事后清理隔离在压缩组件内部。微压缩先于自动压缩执行、只按 `tool_use_id` 操作且不读内容，与工具结果预算的替换逻辑可以干净组合。迁移要点：上下文管理策略与主循环解耦，新增压缩手段时循环代码零改动。
 
-- **生成器的两种产出**：签名把 yield 类型（`StreamEvent | RequestStartEvent | Message | TombstoneMessage | ToolUseSummaryMessage`）与 return 类型（`Terminal`）分开声明（`query.ts:397-404`）。yield 是「给上层看的中间产物」，return 是「循环为什么结束」——两层语义用同一个生成器承载。
-- **参数分两类**：解构出来的 `systemPrompt`、`canUseTool`、`maxTurns` 等在循环内永不再赋值（注释原文 `Immutable params — never reassigned`，`query.ts:405-407`）；会变化的字段全部收进 `State`（`query.ts:421-432`），每个 continue 站点写 `state = { ... }` 一次完成（`query.ts:418-420` 注释）。这消除了 9 个独立的赋值点。
-- **依赖注入一行完成**：`params.deps ?? productionDeps()`（`query.ts:416`）——测试注入 `QueryDeps` 即替换 `callModel`、`microcompact`、`autocompact`、`uuid` 四个 I/O 依赖（`deps.ts:21-31`），循环其余代码完全不变。
-- **跨轮次恢复状态的初值**：`maxOutputTokensRecoveryCount: 0`、`hasAttemptedReactiveCompact: false`、`turnCount: 1`、`transition: undefined` 说明恢复类状态是「一轮内有效」的，在回填站点会按需重置（对照 `query.ts:2048-2049`）。
-- **feature 门控的位置约束**：`feature('TOKEN_BUDGET')` 直接出现在三元条件位置（`query.ts:433`），符合 Bun 编译器对 `feature()` 只能用于条件位置的限制，关闭时整个分支被消除。
+**消息保真的防御性细节。** 剥离消息上的临时字段时做浅拷贝，避免与正在渲染的界面产生竞争；最终用量经对象属性原位回写，保持转录写队列的引用有效；模型回退时对孤儿消息产出 tombstone，防止带无效签名的内容混入后续请求。这三处细节都属于「消息对象被多方持有」场景下的防御性处理，任何流式 agent 项目都会遇到。
 
-### 4.2 单轮累积数组与 needsFollowUp
-
-`src/query.ts:749-766`：
-
-```ts
-    const assistantMessages: AssistantMessage[] = []
-    const toolResults: (UserMessage | AttachmentMessage)[] = []
-    // @see https://docs.claude.com/en/docs/build-with-claude/tool-use
-    // Note: stop_reason === 'tool_use' is unreliable -- it's not always set correctly.
-    // Set during streaming whenever a tool_use block arrives — the sole
-    // loop-exit signal. If false after streaming, we're done (modulo stop-hook retry).
-    const toolUseBlocks: ToolUseBlock[] = []
-    let needsFollowUp = false
-
-    queryCheckpoint('query_setup_start')
-    const useStreamingToolExecution = config.gates.streamingToolExecution
-    let streamingToolExecutor = useStreamingToolExecution
-      ? new StreamingToolExecutor(
-          toolUseContext.options.tools,
-          canUseTool,
-          toolUseContext,
-        )
-      : null
-```
-
-讲解：
-
-- **三个数组、一个布尔**：`assistantMessages` 收本轮 API 产出的助手消息，`toolResults` 收工具结果与附件消息，`toolUseBlocks` 收流中出现过的 `tool_use` block，`needsFollowUp` 决定是否进入下一轮 API 调用。跨轮次数据在 `state.messages`，本轮数据在这四个局部变量——职责边界一目了然。
-- **harness 自己判定「模型是否要调用工具」**：注释直说 `stop_reason === 'tool_use'` 不可靠，于是把「流中出现过 tool_use block」作为唯一的循环继续信号（`query.ts:751-755`）。对应实现位于 `query.ts:1083-1093`：每次 `assistantMessages.push` 之后过滤 `tool_use` 并同步置 `needsFollowUp = true`。
-- **执行路径的双实现**：`config.gates.streamingToolExecution` 是入口处快照的运行期开关（`query.ts:759`，来源 `config.ts:33-35` 的 Statsig gate）。开启时工具在模型流式输出过程中就开始执行（`StreamingToolExecutor.addTool`，`query.ts:1099-1101`），关闭时走 `runTools`（`query.ts:1671`）。两条路径都通过统一的 `update.message` 协议回填（`query.ts:1673-1689`），循环主体不感知差异。
-- **工具执行器携带 canUseTool**（`query.ts:761-765`）：权限判定函数从循环参数一路传入执行器，权限弹窗（REPL 的 `toolUseConfirmQueue`）在执行工具期间由 `canUseTool` 触发；用户按 Escape 时 REPL 调用 `toolUseConfirmQueue[0]?.onAbort()`（`REPL.tsx:2616-2619`）。
-
-### 4.3 content_block_stop：增量合并为完整消息
-
-`src/services/api/claude.ts:2270-2318`：
-
-```ts
-          case 'content_block_stop': {
-            const contentBlock = contentBlocks[part.index]
-            if (!contentBlock) {
-              logEvent('tengu_streaming_error', {
-                error_type:
-                  'content_block_not_found_stop' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                part_type:
-                  part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                part_index: part.index,
-              })
-              throw new RangeError('Content block not found')
-            }
-            if (!partialMessage) {
-              logEvent('tengu_streaming_error', {
-                error_type:
-                  'partial_message_not_found' as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                part_type:
-                  part.type as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-                part_index: part.index,
-              })
-              throw new Error('Message not found')
-            }
-            // Merge accumulated text deltas into the content block (O(n) join instead of O(n^2) +=)
-            const deltas = textDeltas.get(part.index)
-            if (deltas) {
-              ;(contentBlock as { text: string }).text = deltas.join('')
-              textDeltas.delete(part.index)
-            }
-            const m: AssistantMessage = {
-              message: {
-                ...partialMessage,
-                usage: partialMessage.usage ?? { ...EMPTY_USAGE },
-                content: normalizeContentFromAPI(
-                  [contentBlock] as BetaContentBlock[],
-                  tools,
-                  options.agentId,
-                ) as MessageContent,
-              },
-              requestId: streamRequestId ?? undefined,
-              type: 'assistant',
-              uuid: randomUUID(),
-              timestamp: new Date().toISOString(),
-              ...(process.env.USER_TYPE === 'ant' &&
-                research !== undefined && { research }),
-              ...(advisorModel && { advisorModel }),
-            }
-            newMessages.push(m)
-            yield m
-            break
-          }
-```
-
-讲解：
-
-- **增量累积的收口点**：`content_block_start` 建骨架（`claude.ts:2091-2149`）、`content_block_delta` 逐段累积（文本进 `textDeltas` 数组，`claude.ts:2223`；工具参数直接拼 `input += delta.partial_json`，`claude.ts:2209`），`content_block_stop` 在这里把二者合并成完整 block。
-- **性能细节**：文本增量用数组收集、stop 时 `deltas.join('')` 一次合并（`claude.ts:2291-2296`），注释说明这是 O(n) join 替代 O(n²) 的逐段 `+=`。
-- **一条 content block 一条 AssistantMessage**：内部消息模型的粒度是「消息」，API 流的粒度是「block」，转换发生在这里——每个 `content_block_stop` 都 `newMessages.push(m)` 并立即 `yield m`（`claude.ts:2314-2316`），所以上层（query.ts / QueryEngine）在 `message_stop` 之前就逐块收到 assistant 消息，UI 得以即时渲染。
-- **格式归一化**：`normalizeContentFromAPI`（`claude.ts:2300-2305`）把 SDK 的 `BetaContentBlock` 转成内部 `MessageContent`，第三方 provider 的适配层把各自格式转成 Anthropic 格式后，下游与主循环完全一致。
-- **先 yield 后补全**：此刻 `usage` 还是 `message_start` 时的初始值、`stop_reason` 还是 null；真实值随后的 `message_delta` 到达，代码直接修改已 yield 消息的属性（`claude.ts:2350-2354`）。直接修改属性、保持对象不变，原因是转录写队列持有 `message.message` 的引用并按 100ms 周期延迟序列化（`claude.ts:2342-2347` 注释）。
-
-### 4.4 maxTurns 判定与回填 continue
-
-`src/query.ts:2032-2056`：
-
-```ts
-    // Check if we've reached the max turns limit
-    if (maxTurns && nextTurnCount > maxTurns) {
-      yield createAttachmentMessage({
-        type: 'max_turns_reached',
-        maxTurns,
-        turnCount: nextTurnCount,
-      })
-      return { reason: 'max_turns', turnCount: nextTurnCount }
-    }
-
-    queryCheckpoint('query_recursive_call')
-    const next: State = {
-      messages: messagesForQuery.concat(assistantMessages, toolResults),
-      toolUseContext: toolUseContextWithQueryTracking,
-      autoCompactTracking: tracking,
-      turnCount: nextTurnCount,
-      maxOutputTokensRecoveryCount: 0,
-      hasAttemptedReactiveCompact: false,
-      pendingToolUseSummary: nextPendingToolUseSummary,
-      maxOutputTokensOverride: undefined,
-      stopHookActive,
-      transition: { reason: 'next_turn' },
-    }
-    state = next
-  } // while (true)
-```
-
-讲解：
-
-- **停止条件的位置**：maxTurns 检查放在工具执行与附件收集之后、continue 之前（`query.ts:2032-2040`）。返回前先 yield 一条 `max_turns_reached` attachment，让上层有机会映射为结构化结果——`QueryEngine.ts:885-918` 正是消费这条 attachment 并产出 `error_max_turns` result。
-- **回填动作在此发生**：`messages: messagesForQuery.concat(assistantMessages, toolResults)`（`query.ts:2044`）把本轮模型输出与工具结果追加到消息历史尾部。下一轮迭代开头会再经 `getMessagesAfterCompactBoundary`（`query.ts:523`）截取压缩边界之后的片段。
-- **恢复状态的单轮语义**：`maxOutputTokensRecoveryCount: 0` 与 `hasAttemptedReactiveCompact: false`（`query.ts:2048-2049`）说明「输出上限恢复」与「反应式压缩」只在产生它们的这一轮有效，新一轮工具回合重新获得恢复机会；对比 `query.ts:1582-1587` 的注释——stop hook 阻塞路径刻意保留 `hasAttemptedReactiveCompact`，因为重置它会造成 压缩→仍超限→错误→hook 阻塞→压缩 的无限循环。
-- **transition 的审计价值**：`transition: { reason: 'next_turn' }`（`query.ts:2053`）记录上一轮为什么继续，`Continue` 联合类型（`transitions.ts:13-20`）覆盖 `collapse_drain_retry`、`reactive_compact_retry`、`max_output_tokens_escalate`、`max_output_tokens_recovery`、`stop_hook_blocking`、`token_budget_continuation`、`next_turn` 七种原因。测试可以直接断言 `transition.reason` 验证恢复路径是否触发，无需翻查消息内容（`query.ts:271-273` 注释）。
-- **循环形式**：注释 `// while (true)`（`query.ts:2056`）对应 `query.ts:460` 的 `while (true)`。循环没有显式条件，所有出口都是 `return { reason: ... }`，配合 `Terminal` 类型保证每个出口的原因可枚举。
-
-## 5 设计思想
-
-以下设计取舍可以直接迁移到其他 agent 项目：
-
-**循环与 UI 解耦**。主循环对外只暴露消息流（yield）与终止原因（return），UI 状态通过 `getAppState` 回调按需读取（`query.ts:768`、`query.ts:906-909`）。同一循环被交互式终端（`REPL.tsx:3513`）与无头 SDK（`QueryEngine.ts:688`）共用，UI 层的变化不会侵入循环逻辑。
-
-**依赖注入以测试为中心**。`deps.ts:21-31` 只声明四个 I/O 依赖（`callModel`、`microcompact`、`autocompact`、`uuid`），测试直接注入 fake，免去逐模块 spyOn 的样板（`deps.ts:8-11` 注释）。生产工厂 `productionDeps()` 用 `typeof fn` 保持签名与真实实现自动同步（`deps.ts:33-39`）。
-
-**状态转移显式化**。跨轮次可变数据集中在一个 `State` 对象里，所有 continue 站点统一 `state = { ... }`（`query.ts:418-432`）；终止与继续各用可辨识联合类型（`transitions.ts`）表达，每个出口原因都可枚举、可测试、可审计。
-
-**停止条件分层与熔断**。判定顺序固定：中断优先于错误（`query.ts:1302`），错误优先于恢复（413 恢复、输出上限恢复），hook 与 token 预算收尾，最后才是 `completed`。压缩失败用 `consecutiveFailures` 熔断（`autoCompact.ts:289-294`），输出上限恢复限制 3 次（`query.ts:194`），每个恢复路径都有次数或条件上限，防止错误路径自身变成无限循环。
-
-**token 预算的动态调整**。四个层面：压缩阈值随上下文窗口分级（50K/30K/13K 缓冲，`autoCompact.ts:77-82`）；请求前预测本轮增长并提前压缩（`query.ts:852-888`）；输出上限先原地升级到 64K 重试一次、再注入「从中断处继续」消息（`query.ts:1475-1543`）；token budget 在消耗低于 90% 时注入 nudge 消息续跑一轮、连续三轮增量低于 500 token 判定为递减收益而终止（`tokenBudget.ts:59-90`）。
-
-**compaction 与主循环的分界**。主循环只做「判定 → 调用 → 替换 messages → 继续」（`query.ts:652-733`），摘要提示词（`prompt.ts`）、会话记忆压缩（`autoCompact.ts:317-339`）、事后清理（`runPostCompactCleanup`）都隔离在 `services/compact/`。微压缩先于自动压缩执行、只按 `tool_use_id` 操作且不读内容，与工具结果预算的替换逻辑可以干净组合（`query.ts:557-563` 注释）。
-
-**消息保真的防御性细节**。三处值得复制：剥离 `toolUseResult` 时做浅拷贝（原地删除会与正在渲染的 UI 产生竞争，见 `query.ts:525-553`）；`message_delta` 用直接改属性回写 usage，保持转录写队列的引用有效（`claude.ts:2342-2354`）；模型回退时对孤儿消息 yield `tombstone`，防止带无效签名的 thinking block 混入后续请求（`query.ts:953-964`）。
+**外部输入经统一通道注入。** 用户排队消息、文件变更、记忆与工具预取附件都在固定的注入点转成附件消息，随工具结果一起回填。模型看到的「世界变化」全部来自消息历史，harness 的状态变化只经消息流传导给模型。迁移要点：给循环设计一个唯一的「世界状态 → 消息」转换点，外部事件一律从该点进入，循环其余部分不需要感知事件来源。

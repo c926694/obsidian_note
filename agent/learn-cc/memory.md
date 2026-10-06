@@ -1,22 +1,25 @@
 # Memory 模块：多层记忆体系
 
-## 1 模块概览
+## 1 概述
 
-Claude Code 的记忆体系由人工维护的指令文件（CLAUDE.md 系列）、模型维护的会话记忆目录（memdir）、每轮后台运行的自动记忆抽取（extract_memories）、会话内笔记（SessionMemory）以及服务器同步的团队记忆（Team Memory）五层组成：指令文件与 MEMORY.md 索引在会话启动时经 `getMemoryFiles()` 合并进 user context，memdir 行为指引经 `loadMemoryPrompt()` 进入 system prompt 的 `memory` 区块，相关性记忆经 `findRelevantMemories()` 以附件形式每轮注入，抽取 agent 在每个查询循环结束后把新记忆写回 memdir。
+Claude Code 的记忆体系由五层组成，按维护者分为两类：人工维护的指令文件（CLAUDE.md 系列）与模型维护的记忆目录（memdir）。会话启动时，指令文件与 MEMORY.md 索引经发现组件合并后进入用户上下文；记忆行为指引进入 system prompt 的 memory 区块；每轮输入时，相关性检索组件选取少量记忆以附件形式注入；查询循环结束后，后台抽取 agent 把新记忆写回记忆目录；团队记忆在会话开始时从服务器拉取，写入时增量上传。
 
 ```mermaid
 flowchart TB
   subgraph L1["第 1 层：人工维护的指令文件"]
     M["Managed<br/>/etc/claude-code/CLAUDE.md"]
     U["User<br/>~/.claude/CLAUDE.md<br/>~/.claude/rules/*.md"]
-    P["Project<br/>CLAUDE.md / .claude/CLAUDE.md<br/>.claude/rules/*.md（根目录到 CWD 逐层）"]
+    P["Project<br/>CLAUDE.md / .claude/CLAUDE.md<br/>.claude/rules/*.md（根目录到当前目录逐层）"]
     LO["Local<br/>CLAUDE.local.md"]
   end
-  subgraph L2["第 2 层：模型维护的 memdir"]
+  subgraph L2["第 2 层：模型维护的 memdir 记忆目录"]
     A["AutoMem<br/>~/.claude/projects/&lt;slug&gt;/memory/<br/>MEMORY.md 索引 + 主题文件"]
-    T["TeamMem<br/>memory/team/<br/>服务器同步"]
+    T["TeamMem<br/>memory/team/ 子目录<br/>服务器同步"]
   end
-  subgraph L3["第 3 层：会话内笔记"]
+  subgraph L3["第 3 层：后台抽取 agent"]
+    EM["extract_memories<br/>查询循环结束后 fork 运行"]
+  end
+  subgraph L4["第 4 层：会话内笔记"]
     SM["SessionMemory<br/>~/.claude/session-memory/*.md"]
   end
   M --> GMF
@@ -25,273 +28,67 @@ flowchart TB
   LO --> GMF
   A --> GMF
   T --> GMF
-  GMF["getMemoryFiles()（claudemd.ts:789）<br/>合并为 MemoryFileInfo[]"]
-  GMF --> GCM["getClaudeMds() 渲染（claudemd.ts:1152）"]
-  GCM --> UC["getUserContext().claudeMd（context.ts:172）"]
-  UC --> PUC["prependUserContext 包装为<br/>project-instructions 用户消息（api.ts:443）"]
-  LP["loadMemoryPrompt() 行为指引（memdir.ts:419）"] --> SPS["systemPromptSection('memory')（constants/prompts.ts:474）"]
-  Q["每轮用户输入"] --> FRM["findRelevantMemories()<br/>Sonnet 选取相关文件（findRelevantMemories.ts:40）"]
-  FRM --> ATT["relevant_memories 附件注入（attachments.ts:2248）"]
-  EM["extractMemories 后台 fork agent<br/>（extractMemories.ts:595）"] -->|写入主题文件与索引| A
-  EM -->|team 目录写入| T
-  SM --> CMP["sessionMemoryCompact 压缩路径<br/>（sessionMemoryCompact.ts:516）"]
+  GMF["发现组件 getMemoryFiles<br/>合并为有序数组"] --> GCM["渲染组件 getClaudeMds<br/>生成指令文本"]
+  GCM --> UC["注入用户上下文<br/>包装为 project-instructions 消息"]
+  LP["行为指引 loadMemoryPrompt"] --> SPS["进入 system prompt 的 memory 区块"]
+  Q["每轮用户输入"] --> FRM["相关性检索 findRelevantMemories<br/>轻量模型选取最多 5 个文件"]
+  FRM --> ATT["relevant_memories 附件注入"]
+  EM -->|写入主题文件与索引| A
+  EM -->|写入 team 子目录| T
+  SM --> CMP["sessionMemoryCompact<br/>用会话笔记替代压缩摘要"]
 ```
 
-### 涉及文件清单
+各层的维护者、生命周期与职责边界：
 
-| 文件路径 | 职责 | 关键导出 |
-| --- | --- | --- |
-| `src/utils/claudemd.ts` | CLAUDE.md 多层发现、`@` include 解析、合并与渲染 | `getMemoryFiles`、`getClaudeMds`、`processMemoryFile`、`processMdRules`、`getMemoryFilesForNestedDirectory`、`processConditionedMdRules` |
-| `src/context.ts` | 构建 user context，产出 `claudeMd` 字段 | `getUserContext`、`getSystemContext` |
-| `src/utils/api.ts` | 把 `claudeMd` 包装为高权重 `<project-instructions>` 用户消息 | `prependUserContext` |
-| `src/utils/memoryFileDetection.ts` | 路径级记忆文件识别（memdir、agent memory、session memory、shell 命令意图） | `isAutoManagedMemoryFile`、`isMemoryDirectory`、`memoryScopeForPath`、`detectSessionFileType`、`isShellCommandTargetingMemory` |
-| `src/memdir/memdir.ts` | 记忆行为指引 prompt 构建与 MEMORY.md 截断 | `buildMemoryLines`、`buildMemoryPrompt`、`loadMemoryPrompt`、`truncateEntrypointContent`、`ENTRYPOINT_NAME` |
-| `src/memdir/memoryTypes.ts` | 四类记忆分类（user/feedback/project/reference）与共享 prompt 区块 | `MEMORY_TYPES`、`parseMemoryType`、`TYPES_SECTION_*`、`WHAT_NOT_TO_SAVE_SECTION`、`MEMORY_FRONTMATTER_EXAMPLE` |
-| `src/memdir/paths.ts` | 记忆目录路径解析与功能开关 | `getAutoMemPath`、`getAutoMemEntrypoint`、`isAutoMemoryEnabled`、`isExtractModeActive`、`isAutoMemPath` |
-| `src/memdir/memoryScan.ts` | 记忆目录扫描与 frontmatter 清单 | `scanMemoryFiles`、`formatMemoryManifest`、`MemoryHeader` |
-| `src/memdir/memoryAge.ts` | 记忆年龄计算与陈旧提示 | `memoryAge`、`memoryAgeDays`、`memoryFreshnessText`、`memoryFreshnessNote` |
-| `src/memdir/findRelevantMemories.ts` | 用 Sonnet 选取相关记忆文件（最多 5 个） | `findRelevantMemories`、`RelevantMemory` |
-| `src/memdir/teamMemPaths.ts` | 团队记忆路径与防穿越校验 | `getTeamMemPath`、`getTeamMemEntrypoint`、`isTeamMemoryEnabled`、`validateTeamMemWritePath`、`validateTeamMemKey` |
-| `src/memdir/teamMemPrompts.ts` | 双目录（private + team）组合 prompt | `buildCombinedMemoryPrompt` |
-| `src/services/extractMemories/extractMemories.ts` | 查询循环结束后的后台记忆抽取 | `initExtractMemories`、`executeExtractMemories`、`createAutoMemCanUseTool`、`drainPendingExtraction` |
-| `src/services/extractMemories/prompts.ts` | 抽取 agent 的 prompt 模板 | `buildExtractAutoOnlyPrompt`、`buildExtractCombinedPrompt` |
-| `src/services/SessionMemory/sessionMemory.ts` | 会话笔记后台维护与触发判定 | `initSessionMemory`、`shouldExtractMemory`、`manuallyExtractSessionMemory`、`createMemoryFileCanUseTool` |
-| `src/services/SessionMemory/prompts.ts` | 会话笔记模板与更新 prompt | `DEFAULT_SESSION_MEMORY_TEMPLATE`、`loadSessionMemoryTemplate`、`buildSessionMemoryUpdatePrompt` |
-| `src/services/SessionMemory/sessionMemoryUtils.ts` | 会话记忆阈值配置与状态 | `SessionMemoryConfig`、`hasMetInitializationThreshold`、`hasMetUpdateThreshold`、`waitForSessionMemoryExtraction` |
-| `src/services/compact/sessionMemoryCompact.ts` | 用会话笔记替代传统压缩的路径 | `trySessionMemoryCompaction`、`shouldUseSessionMemoryCompaction`、`calculateMessagesToKeepIndex` |
-| `src/utils/teamMemoryOps.ts` | 团队记忆工具调用归类与状态文案 | `isTeamMemoryWriteOrEdit`、`isTeamMemorySearch`、`appendTeamMemorySummaryParts` |
-| `src/services/teamMemorySync/index.ts` | 团队记忆服务器同步（GET 拉取 / PUT 增量上传） | `pullTeamMemory`、`pushTeamMemory`、`SyncState` |
-| `src/services/teamMemorySync/watcher.ts` | 团队记忆目录监听与防抖推送 | `startTeamMemorySync`、`startFileWatcher` |
-| `src/commands/memory/memory.tsx` | `/memory` 命令入口（记忆文件选择与编辑） | `call` |
+| 层 | 维护者 | 生命周期 | 注入渠道 | 职责边界 |
+| --- | --- | --- | --- | --- |
+| CLAUDE.md 指令文件 | 人工（随代码提交或存于用户目录） | 会话启动时加载，会话内缓存 | 用户上下文（project-instructions 高权重消息） | 可评审的长期约定：编码规范、构建命令、行为准则 |
+| memdir 记忆目录 | 模型（对话中写入） | 跨会话持久积累 | 会话启动注入索引；每轮注入相关主题文件 | 从当前项目状态无法推导的信息：用户喜好、反馈、项目背景 |
+| extract_memories | 后台 fork agent | 每个查询循环结束运行 | 写入 memdir，经上述渠道再注入 | 兜底抽取：主 agent 没写时它写 |
+| SessionMemory | 后台 fork agent | 当前会话内 | 压缩时替代传统摘要 | 会话内工作状态笔记 |
+| 团队记忆 | 全体成员 + 服务器同步 | 会话开始时拉取，写入时增量上传 | 与 memdir 相同的注入渠道，额外带共享标签 | 组织内共享的项目约定与背景 |
 
-## 2 核心概念
+三个注入渠道的分工：
 
-### 2.1 CLAUDE.md 文件记忆
+- **用户上下文**：指令文件与 MEMORY.md 索引合并后进入每条请求前缀的高权重消息，模型把它当作必须遵守的指令。
+- **system prompt 区块**：记忆行为指引（保存什么、如何保存、何时读取）以固定区块进入 system prompt，只在开关切换时变化。
+- **每轮附件**：相关性检索组件每轮选取最多 5 个相关记忆文件，以附件形式注入当轮请求，随话题变化。
 
-**概念定义**：人工维护的 Markdown 指令文件，按 `Managed`、`User`、`Project`、`Local` 四类分层，在会话启动时被发现、解析、合并为一个有序数组，最终渲染成 user context 中的指令文本。
+## 2 核心组件与职责
 
-**设计动机**：代码仓库里的约定必须可评审、可随代码提交（checked into the codebase）、跨会话恒定。`claudemd.ts` 头部注释（`src/utils/claudemd.ts:1-26`）写明加载顺序与优先级语义："Files are loaded in reverse order of priority, i.e. the latest files are highest priority"，以及 "Files closer to the current directory have higher priority (loaded later)"。
+### 2.1 指令文件层：发现与渲染分离
 
-**层级发现**：`getMemoryFiles()`（`src/utils/claudemd.ts:789-1074`）按固定顺序处理：
+发现组件 getMemoryFiles 与渲染组件 getClaudeMds 各司其职：前者负责目录遍历、读取、解析，产出有序数组；后者只做文本渲染。分离的好处是嵌套目录补加载可以复用同一渲染逻辑。
 
-1. `Managed`（`src/utils/claudemd.ts:802-822`）：`getMemoryPath('Managed')` 指向系统级文件，始终加载。
-2. `User`（`src/utils/claudemd.ts:824-846`）：`getMemoryPath('User')` 指向 `~/.claude/CLAUDE.md`，仅在 `userSettings` 启用时加载；`includeExternal` 恒为 `true`（`:832`），用户级文件可以自由 include 外部文件。
-3. `Project` 与 `Local`（`src/utils/claudemd.ts:848-933`）：从 CWD 向上收集目录链（`:849-856`），`reverse()` 后从根目录向 CWD 逐层处理（`:877`），每层依次尝试 `CLAUDE.md`、`.claude/CLAUDE.md`、`.claude/rules/*.md`（`:886-919`）以及 `CLAUDE.local.md`（`:921-932`）。
-4. `AutoMem`（`src/utils/claudemd.ts:978-991`）：memdir 的 `MEMORY.md` 入口文件，`isAutoMemoryEnabled()` 打开且文件存在时加载。
-5. `TeamMem`（`src/utils/claudemd.ts:993-1006`）：`team/MEMORY.md`，`feature('TEAMMEM')` 打开且团队记忆启用时加载。
+**发现组件**：整个会话只执行一次目录遍历（结果缓存）。处理顺序固定为 Managed → User → Project → Local → AutoMem → TeamMem：
 
-**子目录就近加载**：`getMemoryFilesForNestedDirectory()`（`src/utils/claudemd.ts:1248-1317`）为 CWD 与目标文件之间的某个目录单独加载 `CLAUDE.md`、`.claude/CLAUDE.md`、无条件 rules 与条件 rules；条件 rules 通过 frontmatter 的 `paths` glob 与目标文件匹配（`processConditionedMdRules`，`src/utils/claudemd.ts:1353-1396`），不匹配的文件不注入。这套机制让"编辑 `src/a/b.ts` 时加载 `src/a/.claude/rules/` 下的规则"成为可能。
+- Managed：系统策略文件与对应规则目录，不依赖任何开关，始终加载。
+- User：用户目录下的 CLAUDE.md 与 rules 目录，仅在用户设置启用时加载；用户级文件始终允许引用工作目录之外的文件。
+- Project 与 Local：从当前目录向上收集目录链，翻转后从根目录向当前目录逐层处理；每层依次尝试 CLAUDE.md、.claude/CLAUDE.md、.claude/rules/*.md 与 CLAUDE.local.md。
+- AutoMem：memdir 的 MEMORY.md 索引文件，自动记忆开启且文件存在时加载。
+- TeamMem：team 子目录下的 MEMORY.md，团队记忆开启时加载。
 
-**import 语法**：头部注释（`src/utils/claudemd.ts:18-25`）定义了 `@path`、`@./relative/path`、`@~/home/path`、`@/absolute/path` 四种形式。实现位于 `extractIncludePathsFromTokens()`（`src/utils/claudemd.ts:450-534`）：
+数组顺序即优先级：先加入的条目优先级低，靠近当前目录的条目后加入、在渲染文本中位置更靠后，模型读到"更近的指令更靠后"。该设计用数据结构本身表达优先级，省掉了优先级字段与排序逻辑；新增层级只需决定插入位置。
 
-- 用 `marked` 的 `Lexer` 把文件词法化为 token 树，只处理 `text` 节点（`:516-518`），跳过 `code` 与 `codespan`（`:495-497`），保证代码块里的 `@` 引用不会被误解析；
-- 递归深度上限 `MAX_INCLUDE_DEPTH = 5`（`src/utils/claudemd.ts:536`），`processMemoryFile` 同时用 `processedPaths` 集合防循环引用（`:628-631`）；
-- 仅允许文本扩展名（`TEXT_FILE_EXTENSIONS`，`src/utils/claudemd.ts:95-226`），二进制文件被静默跳过（`:348-353`）；
-- 工作目录之外的 include 需要用户在配置中批准：`includeExternal = forceIncludeExternal || config.hasClaudeMdExternalIncludesApproved`（`:797-800`），未批准时 `processMemoryFile` 跳过外部文件（`:665-669`）。
+**@include 引用**：记忆文件可以用 @path、@./relative/path、@~/home/path、@/absolute/path 四种形式引用其他文件。解析时把文件词法化为 token 树，只在文本节点中识别引用，代码块内的 @ 不会被误解析。递归深度上限 5 层，配合已处理路径集合阻断循环引用；仅允许文本扩展名，二进制文件静默跳过；引用工作目录之外的文件需要用户批准。
 
-**优先级**：`result` 数组的顺序就是优先级顺序——后加入的条目更靠近 CWD、在 `getClaudeMds()` 输出中位置更靠后。`getClaudeMds()`（`src/utils/claudemd.ts:1152-1194`）按类型附加不同的括号描述，例如 Project 是 "(project instructions, checked into the codebase)"、Local 是 "(user's private project instructions, not checked in)"（`:1167-1176`）。
+**渲染组件**：把数组中的每条记忆渲染成"完整路径 + 类型描述 + 内容"的片段，全部文件用空行拼接，最前面加上声明指令优先级的固定前缀（"These instructions OVERRIDE any default behavior"）。类型描述是模型区分来源可信度的关键信号：Project 标注 checked into the codebase，Local 标注 private, not checked in，团队记忆额外包一层共享标签。
 
-**上限与例外**：单个文件超过 `MAX_MEMORY_CHARACTER_COUNT = 40000` 字符会进入 `getLargeMemoryFiles()` 的告警路径（`src/utils/claudemd.ts:91`、`:1131-1133`）；`claudeMdExcludes` 设置可用 picomatch 排除 User/Project/Local 文件（`:546-572`）。
+**子目录就近加载与条件规则**：编辑子目录中的文件时，为该目录链单独加载 CLAUDE.md 与规则文件；规则文件可用 frontmatter 中的 paths glob 声明作用域，只对命中的文件注入。这套机制让"编辑某个子目录的文件时加载该子目录的规则"成为可能。
 
-### 2.2 memdir 会话记忆目录
-
-**概念定义**：模型自己维护的持久记忆目录 `~/.claude/projects/<sanitized-git-root>/memory/`，`MEMORY.md` 充当索引，实际内容存放在以主题命名的 `.md` 文件中。与 CLAUDE.md 的区别在于维护者：CLAUDE.md 由人写，memdir 由模型在对话中写。
-
-**路径结构**：`getAutoMemPath()`（`src/memdir/paths.ts:223-235`）的解析顺序是：
-
-1. `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` 环境变量（Cowork/SDK 的全路径覆盖）；
-2. `settings.json` 的 `autoMemoryDirectory`（仅 policy/local/user 三个可信来源，排除 projectSettings，防止恶意仓库把记忆目录指向 `~/.ssh`，见 `getAutoMemPathSetting` 注释 `src/memdir/paths.ts:172-186`）；
-3. 默认 `<memoryBase>/projects/<sanitized-git-root>/memory/`，其中 `getAutoMemBase()` 使用 canonical git root，让同一仓库的多个 worktree 共享一个记忆目录（`src/memdir/paths.ts:203-205`）。
-
-`isAutoMemoryEnabled()`（`src/memdir/paths.ts:30-55`）的判定链：`CLAUDE_CODE_DISABLE_AUTO_MEMORY` 环境变量 → `--bare` 模式 → 远程模式无记忆目录 → `settings.json` 的 `autoMemoryEnabled` → 默认开启。
-
-**条目类型**：`MEMORY_TYPES`（`src/memdir/memoryTypes.ts:14-21`）把记忆限定为 `user`、`feedback`、`project`、`reference` 四类，文件头部注释（`:1-12`）给出分类依据：能从当前项目状态推导的内容（代码模式、架构、git 历史）不属于记忆。`parseMemoryType()`（`:28-31`）对未知或缺失的 `type:` 字段返回 `undefined`，旧文件继续可用。
-
-**扫描**：`scanMemoryFiles()`（`src/memdir/memoryScan.ts:35-77`）用 `readdir(recursive)` 列出全部 `.md` 文件（排除 `MEMORY.md` 本身），对每个文件只读前 `FRONTMATTER_MAX_LINES = 30` 行解析 frontmatter（`:22`、`:48-55`），按 mtime 降序排序后截取前 `MAX_MEMORY_FILES = 200` 个（`:21`、`:72-73`）。`formatMemoryManifest()`（`:84-94`）把头部列表渲染成一行一个文件的清单：`- [type] filename (timestamp): description`。
-
-**相关性检索**：`findRelevantMemories()`（`src/memdir/findRelevantMemories.ts:40-78`）先扫描得到头部清单，再调用 `selectRelevantMemories()`（`:80-147`）用 `sideQuery` 请求 Sonnet 从清单中选取最多 5 个"确定有用"的文件（选取 prompt 见 `:19-25`），输出走 `json_schema` 约束的 `selected_memories` 数组（`:113-123`）。`alreadySurfaced` 集合在调用前过滤掉前几轮已经展示过的文件（`:48-50`），让 5 个名额花在新的候选文件上。选取结果连同 mtime 一起返回（`:77`），供上层附加时效提示。
-
-**年龄处理**：`memoryAge.ts` 的核心判断是"模型不擅长日期运算"——原始 ISO 时间戳不会触发陈旧性推理，"47 days ago" 才会（`src/memdir/memoryAge.ts:10-14`）。`memoryAge()`（`:15-20`）输出 `today` / `yesterday` / `N days ago`；`memoryFreshnessText()`（`:33-42`）对超过 1 天的记忆附加警告："Memories are point-in-time observations, not live state — claims about code behavior or file:line citations may be outdated. Verify against current code before asserting as fact."；`memoryFreshnessNote()`（`:49-53`）把它包进 `<system-reminder>` 供无包装的调用方（如 FileReadTool 输出）使用。
-
-**MEMORY.md 截断**：`truncateEntrypointContent()`（`src/memdir/memdir.ts:57-103`）执行双重上限：先按 `MAX_ENTRYPOINT_LINES = 200` 行截断（`:34`），再按 `MAX_ENTRYPOINT_BYTES = 25_000` 字节在最近换行处截断（`:38`、`:82-85`），并附加一段说明哪个上限触发的警告文本（`:94-97`）。
-
-### 2.3 自动记忆抽取（extract_memories）
-
-**概念定义**：每个查询循环结束时，一个 fork 出来的后台 agent 分析最新对话内容，把值得跨会话保留的信息写入 memdir。主 agent 的 system prompt 里本来就有完整的保存指引，抽取 agent 负责兜底——主 agent 没写时它写。
-
-**触发时机**：`src/services/extractMemories/extractMemories.ts` 头部注释（`:1-14`）写明：在模型产出无工具调用的最终回复时，经 `handleStopHooks` 触发。实际触发代码在 `src/query/stopHooks.ts:143-162`，条件链为：
-
-- `feature('EXTRACT_MEMORIES')` 打开；
-- 非 subagent（`!toolUseContext.agentId`）；
-- `isExtractModeActive()`（`src/memdir/paths.ts:69-77`）通过 GrowthBook gate 判定；
-- 未启用穷鬼模式（`!poorMode`）。
-
-进入 `executeExtractMemories()`（`src/services/extractMemories/extractMemories.ts:595-600`）后还有三层收窄：仅主 agent（`:528-531`）、`isAutoMemoryEnabled()`（`:541-544`）、非远程模式（`:546-549`）。若上一次抽取仍在运行，本次 context 被暂存为 trailing run，等当前运行结束后补跑一次（`:551-561`）。
-
-**节流与互斥**：`runExtraction()` 内部用闭包状态管理：
-
-- `turnsSinceLastExtraction` 计数，每 `tengu_bramble_lintel`（默认 1）个合格轮次才运行一次（`:371-383`）；
-- `hasMemoryWritesSince()`（`:120-147`）检查游标之后的消息里是否已有 Write/Edit 指向记忆目录——主 agent 已经写过记忆时，本轮直接跳过并推进游标，主 agent 与后台 agent 在每一轮互斥（`:342-357`）；
-- 游标 `lastMemoryMessageUuid` 只在成功运行后推进（`:426-432`），出错时下一轮重新考虑这些消息。
-
-**prompt 设计**：`prompts.ts` 的 `opener()`（`src/services/extractMemories/prompts.ts:29-44`）给抽取 agent 设定边界：
-
-- 工具白名单：`Read`、`Grep`、`Glob`、只读 `Bash`、以及记忆目录内的 `Edit`/`Write`，其余一律拒绝；
-- 轮次策略：第一轮并行发出所有 `Read`，第二轮并行发出所有 `Write`/`Edit`，不允许读写交错（`Edit` 要求先 `Read` 同一文件）；
-- 内容边界："You MUST only use content from the last ~N messages"，禁止 grep 源码、禁止读代码验证模式、禁止 git 命令（`:41`）。
-
-**写入位置与权限**：`createAutoMemCanUseTool()`（`src/services/extractMemories/extractMemories.ts:170-221`）实现工具级收口：`Read`/`Grep`/`Glob` 放行，`Bash` 只放行 `isReadOnly` 命令，`Edit`/`Write` 仅当 `file_path` 位于 `isAutoMemPath()` 内。`TEAMMEM` 打开时 team 目录是 auto 目录的子目录，因此团队记忆写入也在此放行范围内。
-
-**运行机制**：`runForkedAgent`（`:412-424`）以完美 fork 的方式运行——与主对话共享 system prompt 与消息前缀，命中同一份 prompt cache（头部注释 `:8-9`）；`maxTurns: 5` 限制轮次上限防止验证黑洞，`skipTranscript: true` 避免与主线程竞争转写。
-
-**如何避免污染**：三层防线——抽取 prompt 自带 `WHAT_NOT_TO_SAVE_SECTION` 排除清单（可推导内容、git 历史、调试配方、临时状态）；抽取前预注入现有记忆清单 `formatMemoryManifest(await scanMemoryFiles(...))`，避免 agent 先花一轮 `ls` 且能更新旧文件而避免重复创建（`:392-397`）；写入完成后用 `createMemorySavedMessage()` 把保存结果作为 system 消息追加给主线程（`:487-492`）。
-
-### 2.4 记忆与提示词的关系
-
-**文件记忆进入 user context**：`getUserContext()`（`src/context.ts:155-189`）在 `:172` 调用 `getClaudeMds(filterInjectedMemoryFiles(await getMemoryFiles()))`，结果作为 `claudeMd` 字段返回。`filterInjectedMemoryFiles()`（`src/utils/claudemd.ts:1141-1150`）在 `tengu_moth_copse` gate 打开时把 `AutoMem`/`TeamMem` 从注入中过滤掉——此时相关性记忆改由 `findRelevantMemories` 附件提供，MEMORY.md 索引不再重复占位。
-
-**包装为高权重消息**：`prependUserContext()`（`src/utils/api.ts:443-485`）把 `claudeMd` 从通用 context 中分离出来，单独包装成 `<project-instructions>` 用户消息（`:461-468`）；注释（`:455-457`）说明原因：指令如果埋在 `<system-reminder>` 里会带上 "may or may not be relevant" 的声明，削弱指令权重。其余 context（git status 等）才进 `<system-reminder>`（`:470-482`）。
-
-**memdir 行为指引进入 system prompt**：`src/constants/prompts.ts:474` 注册 `systemPromptSection('memory', () => loadMemoryPrompt())`。`loadMemoryPrompt()`（`src/memdir/memdir.ts:419-507`）按功能组合分派：
-
-- KAIROS 日志模式（`:432-438`）：返回 `buildAssistantDailyLogPrompt()`（`:327-370`），新记忆追加到 `logs/YYYY/MM/YYYY-MM-DD.md`，MEMORY.md 由夜间 `/dream` 进程维护；
-- 团队记忆启用（`:448-473`）：先 `ensureMemoryDirExists(teamDir)`（team 目录是 auto 目录的子目录，递归 mkdir 同时创建了 auto 目录），再返回 `buildCombinedMemoryPrompt()`；
-- 仅 auto（`:475-490`）：`buildMemoryLines('auto memory', autoDir, ...)`；
-- 全部关闭（`:492-506`）：记录 `tengu_memdir_disabled` 遥测并返回 `null`。
-
-注意 `loadMemoryPrompt` 的产物只含行为指引，不含 MEMORY.md 内容——`buildMemoryLines` 的注释（`src/memdir/memdir.ts:196-197`）写明 "content injected via user context instead"，MEMORY.md 内容经 `getMemoryFiles()` 走 user context 注入；`buildMemoryPrompt()`（`:272-316`）才是"含内容"的版本，供没有 `getClaudeMds()` 等价物的 agent memory 使用。
-
-**SDK 自定义 prompt 的补偿**：`QueryEngine.ts:320-335` 中，当调用方提供了自定义 system prompt 且设置了 `CLAUDE_COWORK_MEMORY_PATH_OVERRIDE` 时，显式调用 `loadMemoryPrompt()` 注入记忆机制指引（`memoryMechanicsPrompt`），保证自定义 prompt 场景下模型仍然知道如何读写记忆目录。
-
-**相关性记忆进入附件**：`getRelevantMemoryAttachments()`（`src/utils/attachments.ts:2248-2296`）在每轮输入时调用 `findRelevantMemories()`，最多取 5 个文件（`:2288`），经 `readMemoriesForSurfacing()` 读取全文（`:2337`）后作为 `relevant_memories` 类型附件注入（`:2295`）；`collectSurfacedMemories()`（`:2305-2324`）扫描历史附件得到已展示路径集合，用于跨轮去重。
-
-### 2.5 团队记忆
-
-**概念定义**：memdir 的 `team/` 子目录，内容按仓库共享给组织内所有成员，会话开始时从服务器同步，写入时增量上传。
-
-**路径与开关**：`getTeamMemPath()`（`src/memdir/teamMemPaths.ts:84-86`）定义为 `join(getAutoMemPath(), 'team')`；`isTeamMemoryEnabled()`（`:73-78`）先要求 `isAutoMemoryEnabled()`，再查 GrowthBook gate `tengu_herring_clock`——团队记忆依赖 auto 记忆，因此所有团队记忆消费方（prompt、内容注入、同步 watcher、文件检测）保持一致。
-
-**prompt 设计**：`buildCombinedMemoryPrompt()`（`src/memdir/teamMemPrompts.ts:22-100`）同时给出两个目录的路径与 `## Memory scope` 说明（`:69-78`）：private 记忆只对当前用户，team 记忆"synced at the beginning of every session"。四类记忆各带 `<scope>` 指引（`TYPES_SECTION_COMBINED`，`src/memdir/memoryTypes.ts:37-65`）：user 恒为 private、feedback 默认 private、project 强烈倾向 team、reference 通常 team。团队侧追加一条硬性规则："You MUST avoid saving sensitive data within shared team memories"（`src/memdir/teamMemPrompts.ts:78`）。
-
-**上下文注入**：`getClaudeMds()` 对 `TeamMem` 类型使用专用包装 `<team-memory-content source="shared">`（`src/utils/claudemd.ts:1179-1182`），与普通指令文本区分。
-
-**服务器同步**：`src/services/teamMemorySync/index.ts` 头部注释（`:1-25`）定义 API 语义：按 git remote 的 repo 作用域，`GET` 拉取（服务器内容按 key 覆盖本地）、`PUT` 增量上传（只上传 sha256 哈希与服务器校验和不同的条目，服务器 upsert 合并）、文件删除不传播。单文件上限 `MAX_FILE_SIZE_BYTES = 250_000`（`:75`），单批请求体上限 `MAX_PUT_BODY_BYTES = 200_000`（`:89`）——超过时分成多个顺序 PUT，依赖服务器 upsert 语义保证安全。
-
-**文件监听**：`src/services/teamMemorySync/watcher.ts` 在启动时先 `pullTeamMemory()`，然后 `fs.watch(recursive)` 监听 team 目录，2 秒防抖后推送（`DEBOUNCE_MS = 2000`，`:35`；`:167-229`）。选择 `fs.watch` 而弃用 chokidar 的原因写在注释里（`:150-166`）：chokidar 4+ 弃用 fsevents，Bun 的 kqueue 回退需要每个文件一个 fd。永久性失败（无 OAuth、无 repo、4xx）会抑制重试，防止无限推送循环（`:53-73`）。
-
-**安全校验**：`sanitizePathKey()`（`src/memdir/teamMemPaths.ts:22-64`）拒绝 null byte、URL 编码穿越（`%2e%2e%2f`）、Unicode 归一化攻击（全角 `．．／` 在 NFKC 下变成 `../`）、反斜杠与绝对路径；`validateTeamMemWritePath()`（`:228-256`）与 `validateTeamMemKey()`（`:265-284`）做双层包含性校验——先 `path.resolve()` 做字符串级检查，再 `realpathDeepestExisting()`（`:109-171`）解析最深已存在祖先的符号链接，对照真实 team 目录判定，封住 symlink 逃逸。
-
-### 2.6 记忆与 compaction 的边界
-
-**SessionMemory 是会话内笔记**：模板 `DEFAULT_SESSION_MEMORY_TEMPLATE`（`src/services/SessionMemory/prompts.ts:13-43`）划分 `Current State`、`Task specification`、`Files and Functions`、`Workflow`、`Errors & Corrections`、`Learnings`、`Key results`、`Worklog` 等区块，文件位于 `~/.claude/session-memory/`。维护方式是后台 fork agent 更新笔记（`extractSessionMemory`，`src/services/SessionMemory/sessionMemory.ts:273-357`），阈值由 `DEFAULT_SESSION_MEMORY_CONFIG`（`src/services/SessionMemory/sessionMemoryUtils.ts:32-36`）控制：上下文达到 10 000 tokens 才初始化、之后每增长 5 000 tokens 或每 3 次工具调用考虑更新。`shouldExtractMemory()`（`src/services/SessionMemory/sessionMemory.ts:135-182`）要求 token 阈值必须满足，工具调用阈值或"上一轮无工具调用"二者满足其一。
-
-**与 memdir 的分工**：memdir 的 `MEMORY.md` 面向未来对话（跨会话），SessionMemory 面向当前会话的压缩连续性；`buildMemoryLines` 里的 "Memory and other forms of persistence" 区块（`src/memdir/memdir.ts:254-257`）直接写给模型：计划（plan）、任务（tasks）、记忆（memory）各有用途，只对当前会话有用的信息不应进记忆。
-
-**sessionMemoryCompact 路径**：`shouldUseSessionMemoryCompaction()`（`src/services/compact/sessionMemoryCompact.ts:405-434`）要求 `tengu_session_memory` 与 `tengu_sm_compact` 两个 gate 同时打开（可用环境变量覆盖）。`trySessionMemoryCompaction()`（`:516-632`）在需要压缩时用会话笔记替代传统压缩摘要：等待进行中的抽取完成（`:529`），读取笔记内容，若笔记仍是空模板则回退到传统压缩（`:540-545`），否则从 `lastSummarizedMessageId` 之后保留消息（`calculateMessagesToKeepIndex`，`:326-399`，下限 10 000 tokens / 5 条文本消息，上限 40 000 tokens，见 `:57-61`），把截断后的笔记当作压缩摘要（`:461-476`）。
-
-## 3 关键流程
-
-### 3.1 CLAUDE.md 发现与合并流程
-
-```mermaid
-flowchart TD
-  A["会话启动，getUserContext()（context.ts:172）"] --> B["getMemoryFiles()（claudemd.ts:789，memoize 缓存）"]
-  B --> C["processMemoryFile Managed（claudemd.ts:802-811）"]
-  B --> D["processMdRules Managed rules（claudemd.ts:812-822）"]
-  B --> E["User CLAUDE.md 与 rules（claudemd.ts:824-846）"]
-  B --> F["从 CWD 向上收集目录链（claudemd.ts:849-856）"]
-  F --> G["reverse 后从根目录向 CWD 逐层（claudemd.ts:877）"]
-  G --> H["每层尝试 CLAUDE.md / .claude/CLAUDE.md /<br/>.claude/rules/*.md / CLAUDE.local.md（claudemd.ts:886-933）"]
-  H --> I["processMemoryFile：frontmatter、HTML 注释剥离、<br/>@ include 递归（claudemd.ts:617-684）"]
-  B --> J["AutoMem MEMORY.md（claudemd.ts:978-991）"]
-  B --> K["TeamMem team/MEMORY.md（claudemd.ts:993-1006）"]
-  C & D & E & I & J & K --> R["result: MemoryFileInfo[]<br/>数组顺序即优先级"]
-  R --> S["getClaudeMds() 渲染文本（claudemd.ts:1152-1194）"]
-  S --> T["getUserContext().claudeMd（context.ts:185）"]
-  T --> U["prependUserContext 包装为<br/>project-instructions 用户消息（api.ts:461-468）"]
-```
-
-分步讲解：
-
-1. **入口**：`getUserContext()` 在 `src/context.ts:172` 调用 `getClaudeMds(filterInjectedMemoryFiles(await getMemoryFiles()))`。`getMemoryFiles` 被 `memoize` 包裹，整个会话只完整执行一次目录遍历；`clearMemoryFileCaches()`（`src/utils/claudemd.ts:1118-1121`）供 `/memory` 对话框等工作流变更场景手动失效。
-2. **Managed 层**：`src/utils/claudemd.ts:802-822` 处理系统策略文件与对应 rules 目录，不依赖任何开关。
-3. **User 层**：`src/utils/claudemd.ts:824-846`，`isSettingSourceEnabled('userSettings')` 控制；此处 `includeExternal: true`，用户级文件可以 include 工作目录以外的文件。
-4. **目录链构建**：`src/utils/claudemd.ts:849-856` 用 `dirname()` 从 CWD 逐级上溯到根，随后 `reverse()` 得到"根 → CWD"顺序（`:877`）。
-5. **逐层加载**：每层一个目录处理 `CLAUDE.md`、`.claude/CLAUDE.md`、`.claude/rules/*.md` 与 `CLAUDE.local.md`（`:886-933`），靠近 CWD 的文件后入数组，优先级更高。
-6. **单文件解析**：`processMemoryFile`（`:617-684`）内完成排除匹配、符号链接解析、读取、frontmatter 剥离、HTML 注释剥离、`@` include 递归与环检测。
-7. **memdir 入口**：`:978-1006` 把 `MEMORY.md`（AutoMem）与 `team/MEMORY.md`（TeamMem）作为最后两类条目追加。
-8. **渲染**：`getClaudeMds()`（`:1152-1194`）把每条内容拼成 `Contents of <path><type 描述>:\n\n<content>`，整体前缀 `MEMORY_INSTRUCTION_PROMPT`（`:88-89`）："These instructions OVERRIDE any default behavior"。
-9. **注入**：`prependUserContext()`（`src/utils/api.ts:461-468`）把合并文本包进 `<project-instructions>` 独立用户消息。
-
-### 3.2 记忆抽取与注入流程
-
-```mermaid
-flowchart TD
-  A["查询循环结束，模型产出最终回复"] --> B["handleStopHooks（stopHooks.ts:143-162）"]
-  B --> C{"feature EXTRACT_MEMORIES<br/>且非 subagent<br/>且 isExtractModeActive<br/>且非 poor 模式"}
-  C -->|不满足| END1["跳过"]
-  C -->|满足| D["executeExtractMemories（extractMemories.ts:595）"]
-  D --> E{"仅主 agent（:528-531）<br/>auto memory 启用（:541-544）<br/>非远程（:546-549）"}
-  E -->|不满足| END1
-  E -->|满足| F{"inProgress 已在进行？"}
-  F -->|是| G["暂存 context 为 trailing run（:551-561）"]
-  F -->|否| H["runExtraction（:326）"]
-  H --> I{"hasMemoryWritesSince<br/>主 agent 已写记忆（:345）"}
-  I -->|是| J["跳过本轮，推进游标（:342-357）"]
-  I -->|否| K{"节流：turnsSinceLastExtraction<br/>≥ tengu_bramble_lintel（:371-383）"}
-  K -->|否| END1
-  K -->|是| L["scanMemoryFiles 生成现有记忆清单（:392-397）"]
-  L --> M["buildExtractAutoOnlyPrompt 或 buildExtractCombinedPrompt"]
-  M --> N["runForkedAgent：共享 prompt cache、<br/>maxTurns=5、受限 canUseTool（:412-424）"]
-  N --> O["fork 内 Read 现有文件 → Write/Edit 主题文件与 MEMORY.md"]
-  O --> P["推进游标（:426-432）<br/>createMemorySavedMessage 通知主线程（:487-492）"]
-```
-
-读取侧的每轮注入：
-
-```mermaid
-flowchart TD
-  Q["每轮用户输入"] --> R["getRelevantMemoryAttachments（attachments.ts:2248-2296）"]
-  R --> S["findRelevantMemories（findRelevantMemories.ts:40）"]
-  S --> T["scanMemoryFiles 读取 frontmatter（memoryScan.ts:35-77）"]
-  T --> U["sideQuery 用 Sonnet 从清单选取 ≤5 个文件<br/>json_schema 输出（findRelevantMemories.ts:102-128）"]
-  U --> V["readMemoriesForSurfacing 读取全文（attachments.ts:2337）"]
-  V --> W["relevant_memories 附件注入<br/>附带 memoryFreshnessNote 时效提示（memoryAge.ts:49-53）"]
-```
-
-分步讲解：
-
-1. **触发**：`src/query/stopHooks.ts:143-162` 在查询循环收尾阶段检查 `feature('EXTRACT_MEMORIES')`、`!toolUseContext.agentId`、`isExtractModeActive()`、`!poorMode`，满足后 fire-and-forget 调用 `executeExtractMemories()`；`-p`/SDK 场景由 `drainPendingExtraction()`（`src/services/extractMemories/extractMemories.ts:608-612`）在退出前排空。
-2. **收窄**：`:528-549` 排除 subagent、记忆关闭、远程模式三种情况。
-3. **并发控制**：`:551-561` 把运行期间的调用暂存成 trailing run；`:371-383` 节流每 N 轮运行一次。
-4. **互斥判定**：`:345` 检查主 agent 是否已经直接写过记忆文件，写过则跳过。
-5. **清单预注入**：`:392-397` 复用 `scanMemoryFiles`，把现有记忆的 `[type] filename (timestamp): description` 清单放进抽取 prompt，agent 依据它决定更新哪个旧文件。
-6. **fork 运行**：`:412-424` 用 `runForkedAgent` 启动与主对话共享 prompt cache 的后台 agent，工具权限由 `createAutoMemCanUseTool`（`:170-221`）收口到"只读 + 记忆目录内写入"。
-7. **保存**：抽取 agent 写主题文件与 `MEMORY.md` 索引（索引格式见 prompt 的 Step 2，`src/services/extractMemories/prompts.ts:76`）。
-8. **反馈**：`:487-492` 把保存的文件列表以 system 消息追加给主线程。
-9. **每轮读取**：`attachments.ts:2248-2296` 每轮用 Sonnet 选取相关记忆作为附件注入；`collectSurfacedMemories`（`:2305-2324`）保证同一文件不重复注入。
-
-## 4 关键代码精读
-
-### 4.1 `getMemoryFiles()`：数组顺序即优先级的合并函数
-
-以下片段来自 `src/utils/claudemd.ts:789-811`：
+**代码摘录：发现组件的层级顺序骨架**
 
 ```ts
 export const getMemoryFiles = memoize(
   async (forceIncludeExternal: boolean = false): Promise<MemoryFileInfo[]> => {
-    const startTime = Date.now()
-    logForDiagnosticsNoPII('info', 'memory_files_started')
-
     const result: MemoryFileInfo[] = []
     const processedPaths = new Set<string>()
-    const config = getCurrentProjectConfig()
     const includeExternal =
       forceIncludeExternal ||
       config.hasClaudeMdExternalIncludesApproved ||
       false
 
-    // Process Managed file first (always loaded - policy settings)
+    // Managed 层最先处理，始终加载
     const managedClaudeMd = getMemoryPath('Managed')
     result.push(
       ...(await processMemoryFile(
@@ -301,157 +98,44 @@ export const getMemoryFiles = memoize(
         includeExternal,
       )),
     )
-```
 
-以及目录链构建部分，`src/utils/claudemd.ts:848-856`：
-
-```ts
-    // Then process Project and Local files
+    // Project 与 Local 层：从当前目录向上收集目录链
     const dirs: string[] = []
     const originalCwd = getOriginalCwd()
     let currentDir = originalCwd
-
     while (currentDir !== parse(currentDir).root) {
       dirs.push(currentDir)
       currentDir = dirname(currentDir)
     }
+    // 翻转后从根目录向当前目录逐层处理，逐层 push 进 result
+  },
+)
 ```
 
-讲解：
+要点：
 
-- `memoize` 包裹整个函数：目录遍历包含大量"尝试读一个不存在的文件"的 `readFile` 调用（`safelyReadMemoryFileAsync` 把 ENOENT 当正常情况，见 `src/utils/claudemd.ts:401-415`），缓存后整个会话只支付一次遍历成本。
-- `result` 数组是全函数的唯一产出载体，所有层级的文件都按"低优先级在前"的顺序 `push`。Managed 最靠前，Project/Local 随后（根 → CWD），AutoMem/TeamMem 最后。`getClaudeMds()` 直接按数组顺序渲染，因此"后加入 = 更靠近 CWD = 优先级更高"由数据结构本身保证，不需要额外的排序字段。
-- `processedPaths` 贯穿所有 `processMemoryFile` 调用：它同时承担 `@` include 的环检测（`src/utils/claudemd.ts:628-631`）与重复文件去重（memdir 入口在 `:985-989` 检查同一集合）。
-- `includeExternal` 由 `forceIncludeExternal`（审批检查用）或用户配置批准决定；User 层调用时直接传 `true`（`:832`），Project 层受此开关约束。
-- 目录链先收集后 `reverse()`（`:877`）：CWD 上溯得到"近 → 远"顺序，反转后从根目录开始加载，保证子目录文件在数组中位于父目录文件之后。
+- memoize 包裹整个函数：目录遍历包含大量"尝试读取不存在的文件"的调用，缓存后整个会话只支付一次遍历成本。
+- result 数组是唯一产出载体，所有层级的文件都按"低优先级在前"的顺序 push；渲染组件直接按数组顺序输出，优先级由数据结构本身保证。
+- processedPaths 集合贯穿所有单文件解析调用，同时承担 include 环检测与重复文件去重。
+- 目录链先收集后翻转：上溯得到"近 → 远"顺序，翻转后从根目录开始加载，保证子目录文件位于父目录文件之后。
 
-### 4.2 `getClaudeMds()`：从数组到指令文本
+### 2.2 memdir 记忆目录
 
-完整函数，`src/utils/claudemd.ts:1152-1194`：
+**目录结构**：模型维护的持久记忆目录，按仓库隔离（同一仓库的多个 worktree 共享一个目录，靠规范化的 git 根路径定位）。MEMORY.md 充当索引，每条一行指向主题文件；实际内容存放在以主题命名的 .md 文件中。目录解析顺序：环境变量全路径覆盖 → 设置中的目录配置（只信任 policy/local/user 三个来源，排除可被仓库控制的 projectSettings，防止恶意仓库把记忆目录指向敏感位置）→ 默认位置。
 
-```ts
-export const getClaudeMds = (
-  memoryFiles: MemoryFileInfo[],
-  filter?: (type: MemoryType) => boolean,
-): string => {
-  const memories: string[] = []
-  const skipProjectLevel = getFeatureValue_CACHED_MAY_BE_STALE(
-    'tengu_paper_halyard',
-    false,
-  )
+**四类记忆**：记忆限定为 user、feedback、project、reference 四类，以 frontmatter 的 type 字段声明。分类依据写在指引里：能从当前项目状态推导的内容（代码模式、架构、git 历史）不属于记忆。未知或缺失的 type 字段返回 undefined，旧文件继续可用，实现向后兼容降级。
 
-  for (const file of memoryFiles) {
-    if (filter && !filter(file.type)) continue
-    if (skipProjectLevel && (file.type === 'Project' || file.type === 'Local'))
-      continue
-    if (file.content) {
-      const description =
-        file.type === 'Project'
-          ? ' (project instructions, checked into the codebase)'
-          : file.type === 'Local'
-            ? " (user's private project instructions, not checked in)"
-            : feature('TEAMMEM') && file.type === 'TeamMem'
-              ? ' (shared team memory, synced across the organization)'
-              : file.type === 'AutoMem'
-                ? " (user's auto-memory, persists across conversations)"
-                : " (user's private global instructions for all projects)"
+**索引与主题文件的分工**：索引常驻上下文，必须简短——双重上限 200 行与 25KB，超限时截断并附加警告，提示把细节移到主题文件；主题文件按需读取。
 
-      const content = file.content.trim()
-      if (feature('TEAMMEM') && file.type === 'TeamMem') {
-        memories.push(
-          `Contents of ${file.path}${description}:\n\n<team-memory-content source="shared">\n${content}\n</team-memory-content>`,
-        )
-      } else {
-        memories.push(`Contents of ${file.path}${description}:\n\n${content}`)
-      }
-    }
-  }
+**扫描组件**：列出目录中全部 .md 文件（排除索引本身），对每个文件只读前 30 行解析 frontmatter，按修改时间降序排序后截取前 200 个；随后渲染成一行一个文件的清单（类型、文件名、时间戳、描述）。该清单是相关性检索与抽取预注入的共同输入。
 
-  if (memories.length === 0) {
-    return ''
-  }
+**相关性检索组件**：每轮输入时先用扫描组件得到头部清单，再用一次轻量模型调用从清单中选取最多 5 个"确定有用"的文件，输出走 schema 约束的字符串数组。已展示过的文件在本轮调用前就被过滤掉，让名额花在新的候选文件上。选取结果连同修改时间一起返回，供上层附加时效提示。
 
-  return `${MEMORY_INSTRUCTION_PROMPT}\n\n${memories.join('\n\n')}`
-}
-```
+**年龄组件**：把原始时间戳换算成"今天 / 昨天 / N 天前"的自然语言。设计依据是模型不擅长日期运算，原始 ISO 时间戳不会触发陈旧性推理。超过一天的记忆附加警告，声明其内容只代表记录时刻的状态，引用前须对照当前代码验证。
 
-讲解：
+**行为指引组件**：生成记忆行为指引文本——四类记忆的定义、不该保存什么、两段式保存步骤（先写主题文件、再在索引加一行指针）、何时读取、推荐前验证。该组件按功能组合分派：仅自动记忆时输出单目录指引；团队记忆开启时输出双目录（私有 + 团队）指引；长驻会话模式输出按日追加日志的指引。产物只含行为指引，不含记忆内容——索引内容走用户上下文注入，避免重复占位。
 
-- 每条记忆渲染为 `Contents of <完整路径><类型描述>:\n\n<内容>`。路径完整给出，让模型知道指令来自哪个文件，编辑文件时可以直接定位。
-- 类型描述是模型区分指令来源的关键信号："checked into the codebase" 与 "private, not checked in" 让模型明白 Project 与 Local 的可信边界不同；TeamMem 额外包一层 `<team-memory-content source="shared">` XML 标签，把"共享组织内容"与"本机私有内容"在结构上分开。
-- `MEMORY_INSTRUCTION_PROMPT`（`src/utils/claudemd.ts:88-89`）是前缀："Codebase and user instructions are shown below. Be sure to adhere to these instructions. IMPORTANT: These instructions OVERRIDE any default behavior..."——整个合并文本靠这一句获得"覆盖默认行为"的权重，之后在 `prependUserContext` 里又以 `<project-instructions>` 独立用户消息的形式强化。
-- `filter` 参数与 `skipProjectLevel` gate 提供两个收窄口：调用方可以按类型过滤（例如只要 User 层），或通过远端 gate 把 Project/Local 整层关掉。
-
-### 4.3 `runExtraction()`：节流与 fork 的核心
-
-片段一，节流与清单预注入，`src/services/extractMemories/extractMemories.ts:371-397`：
-
-```ts
-    // Only run extraction every N eligible turns (tengu_bramble_lintel, default 1).
-    // Trailing extractions (from stashed contexts) skip this check since they
-    // process already-committed work that should not be throttled.
-    if (!isTrailingRun) {
-      turnsSinceLastExtraction++
-      if (
-        turnsSinceLastExtraction <
-        (getFeatureValue_CACHED_MAY_BE_STALE('tengu_bramble_lintel', null) ?? 1)
-      ) {
-        return
-      }
-    }
-    turnsSinceLastExtraction = 0
-
-    inProgress = true
-    const startTime = Date.now()
-    try {
-      logForDebugging(
-        `[extractMemories] starting — ${newMessageCount} new messages, memoryDir=${memoryDir}`,
-      )
-
-      // Pre-inject the memory directory manifest so the agent doesn't spend
-      // a turn on `ls`. Reuses findRelevantMemories' frontmatter scan.
-      // Placed after the throttle gate so skipped turns don't pay the scan cost.
-      const existingMemories = formatMemoryManifest(
-        await scanMemoryFiles(memoryDir, createAbortController().signal),
-      )
-```
-
-片段二，fork 运行与游标推进，`src/services/extractMemories/extractMemories.ts:412-432`：
-
-```ts
-      const result = await runForkedAgent({
-        promptMessages: [createUserMessage({ content: userPrompt })],
-        cacheSafeParams,
-        canUseTool,
-        querySource: 'extract_memories',
-        forkLabel: 'extract_memories',
-        // The extractMemories subagent does not need to record to transcript.
-        // Doing so can create race conditions with the main thread.
-        skipTranscript: true,
-        // Well-behaved extractions complete in 2-4 turns (read → write).
-        // A hard cap prevents verification rabbit-holes from burning turns.
-        maxTurns: 5,
-      })
-
-      // Advance the cursor only after a successful run. If the agent errors
-      // out (caught below), the cursor stays put so those messages are
-      // reconsidered on the next extraction.
-      const lastMessage = messages.at(-1)
-      if (lastMessage?.uuid) {
-        lastMemoryMessageUuid = lastMessage.uuid
-      }
-```
-
-讲解：
-
-- 节流计数放在一切昂贵操作之前（扫描、prompt 构建、fork 启动），不满足轮次条件时直接 `return`，零成本跳过；trailing run 是已承诺的工作，不受节流约束。
-- `formatMemoryManifest(await scanMemoryFiles(...))` 复用 `findRelevantMemories` 的扫描原语（`memoryScan.ts` 头部注释说明该模块就是为了让 `extractMemories` 引用扫描而分离出来的，`src/memdir/memoryScan.ts:1-5`）。清单进 prompt 之后，抽取 agent 第一轮 Read 的目标更精确，并依据清单更新旧文件。
-- `skipTranscript: true` 与 `maxTurns: 5` 对应注释里的两个失败模式：fork 写转写会与主线程产生竞争；抽取的预期形态是 2-4 轮（一轮并行 Read、一轮并行 Write），硬上限防止 agent 陷入"验证某条记忆是否准确"的调查中——抽取 prompt 本来就禁止它调查（`src/services/extractMemories/prompts.ts:41`）。
-- 游标语义：只有 fork 成功完成后才推进 `lastMemoryMessageUuid`；失败时游标不动，下轮重新考虑同批消息，抽取进度不会丢。
-
-### 4.4 memdir 的类型定义与 frontmatter 模板
-
-类型定义，`src/memdir/memoryTypes.ts:14-31`：
+**代码摘录：记忆类型定义与 frontmatter 模板**
 
 ```ts
 export const MEMORY_TYPES = [
@@ -463,20 +147,15 @@ export const MEMORY_TYPES = [
 
 export type MemoryType = (typeof MEMORY_TYPES)[number]
 
-/**
- * Parse a raw frontmatter value into a MemoryType.
- * Invalid or missing values return undefined — legacy files without a
- * `type:` field keep working, files with unknown types degrade gracefully.
- */
+// 解析 frontmatter 的 type 字段；未知或缺失返回 undefined，旧文件继续可用
 export function parseMemoryType(raw: unknown): MemoryType | undefined {
   if (typeof raw !== 'string') return undefined
   return MEMORY_TYPES.find(t => t === raw)
 }
 ```
 
-frontmatter 模板，`src/memdir/memoryTypes.ts:176-186`：
-
 ```ts
+// 写入 memory 文件时使用的 frontmatter 模板
 export const MEMORY_FRONTMATTER_EXAMPLE: readonly string[] = [
   '```markdown',
   '---',
@@ -490,35 +169,197 @@ export const MEMORY_FRONTMATTER_EXAMPLE: readonly string[] = [
 ]
 ```
 
-讲解：
+要点：
 
-- 类型学是封闭集合：`as const` + 索引类型把 `MemoryType` 锁定为四个字符串字面量联合，任何扩展都要同时改这个数组；`parseMemoryType` 用 `MEMORY_TYPES.find` 做白名单匹配，未知类型返回 `undefined` 继续工作，实现向后兼容的降级。
-- `description` 字段的注释直接写明它的用途："used to decide relevance in future conversations"——`findRelevantMemories` 的选取 prompt 只拿到文件名与 description（`formatMemoryManifest` 的输出），因此 description 写得好坏决定检索质量。
-- frontmatter 是机器扫描与模型写作之间的共用协议：`scanMemoryFiles` 只读前 30 行解析它（`src/memdir/memoryScan.ts:22`），模型按模板写它。协议以"示例模板"的形式出现在 system prompt 与抽取 prompt 里，双方理解成本为零。
-- 模板同时约束内容结构：feedback/project 类要求 "rule/fact, then **Why:** and **How to apply:** lines"，把"记录什么"与"怎么组织"一起教给模型，减少抽取产出的格式噪声。
+- 类型学是封闭集合：as const 加索引类型把 MemoryType 锁定为四个字符串字面量联合，任何扩展都要同时修改这个数组。
+- description 字段的注释写明它的用途：未来对话中判定相关性。相关性检索只拿到文件名与描述，因此描述写得好坏直接决定检索质量。
+- frontmatter 是机器扫描与模型写作之间的共用协议：扫描组件只读前 30 行解析它，模型按模板写它。协议以示例模板的形式出现在 system prompt 与抽取指引里，双方理解成本为零。
+- 模板同时约束内容结构：feedback/project 类要求"规则或事实，随后附 Why 与 How to apply 行"，把"记录什么"与"怎么组织"一起教给模型。
 
-## 5 设计思想
+### 2.3 自动抽取（extract_memories）
 
-### 5.1 人工维护与自动抽取的分工
+**定位**：主 agent 的指引里已有完整的保存规范，抽取组件负责兜底——主 agent 没写时它写。每个查询循环结束时，一个后台 fork agent 分析最新对话，把值得跨会话保留的信息写入记忆目录。
 
-CLAUDE.md 由人维护、随代码提交、可评审；memdir 由模型维护、跨会话积累。两者的边界由 `WHAT_NOT_TO_SAVE_SECTION`（`src/memdir/memoryTypes.ts:98-110`）明文划定：能从代码推导的、git 历史能查的、CLAUDE.md 已写的、当前会话临时的内容都不进 memdir。自动抽取的时机控制也体现同一思路：只在查询循环结束时运行（`stopHooks.ts:143-162`），每轮节流（`extractMemories.ts:371-383`），主 agent 已写则跳过（`:345`），fork 轮次硬上限 5 轮（`:423`）——把自动行为的成本与失控面都压到最低。可迁移思想：给自动持久化一个"白名单类型 + 黑名单内容 + 时机节流"的三重约束，比"随便记"可靠得多。
+**触发条件链**：feature 开关开启、当前是主 agent、自动记忆模式激活、未启用穷鬼模式；进入执行后还有三层收窄：仅主线程、自动记忆已启用、非远程模式。
 
-### 5.2 就近加载的层级设计
+**节流与互斥**：闭包状态管理三项——轮次节流（每 N 个合格轮次运行一次，默认每轮）；写入互斥（检查游标之后的消息里是否已有写操作指向记忆目录，主 agent 已经写过记忆时本轮跳过并推进游标，保证主 agent 与后台 agent 每一轮互斥）；游标（只在成功运行后推进，出错时下一轮重新考虑同批消息）。
 
-`getMemoryFiles` 用数组顺序表达优先级：根目录文件先入数组，CWD 文件后入数组，`getClaudeMds` 按序渲染，模型读到"更近的指令更靠后"。这个设计省掉了显式的优先级字段与排序逻辑，任何新增层级（Managed、AutoMem、TeamMem）只需决定自己在数组中的插入位置。子目录级加载（`getMemoryFilesForNestedDirectory`、`processConditionedMdRules`）则把"就近"推到文件粒度：编辑某个子目录的文件时，只注入该子目录链上匹配 glob 的规则。可迁移思想：上下文分层系统可以用"有序数组 + 约定插入位置"表达优先级，用 glob 条件注入表达作用域，避免维护复杂的优先级配置。
+**权限收口**：抽取 agent 的工具权限被收窄到只读工具 + 记忆目录内的写入——Read/Grep/Glob 放行，Bash 只放行只读命令，Edit/Write 仅当目标位于记忆目录内。团队记忆目录是记忆目录的子目录，写入也在放行范围内。
 
-### 5.3 用文件系统当数据库
+**运行形态**：以完美 fork 方式运行——与主对话共享 system prompt 与消息前缀，命中同一份 prompt cache；轮次上限 5 轮（预期形态是两轮：一轮并行 Read、一轮并行 Write）；跳过转写，避免与主线程竞争。
 
-memdir 没有数据库、没有索引服务：`MEMORY.md` 是索引（每行一条 `- [Title](file.md) — hook`），主题文件是记录，frontmatter 是 schema（name/description/type），`scanMemoryFiles` 只读前 30 行完成检索前置扫描，`findRelevantMemories` 用一次 Sonnet 调用完成相关性排序。用户可以用编辑器直接查看修改记忆，团队记忆直接用 `fs.watch` 监听目录变化推送（`watcher.ts:167-229`）。索引的治理靠硬上限：200 行、25KB、每行约 150 字符（`memdir.ts:34-38`、`memdir.ts:227`），超限截断并提示把细节移到主题文件。可迁移思想：当记录规模在数百以内、读写频率低时，Markdown 文件 + frontmatter + 单文件索引比数据库更透明、更易调试，把"模型可读、用户可读、工具可扫描"统一到同一种格式上。
+**防污染三层防线**：抽取指引自带"不该保存什么"排除清单；抽取前把现有记忆清单预注入指引，agent 可以更新旧文件、无需先花一轮列目录；写入完成后把保存结果以系统消息追加给主线程。
 
-### 5.4 相关性子集检索控制 token
+**代码摘录：节流、清单预注入与游标推进**
 
-记忆总量不可控，注入量必须可控，为此有三层裁剪：MEMORY.md 索引本身被行数/字节上限截断（`truncateEntrypointContent`）；`findRelevantMemories` 只注入最多 5 个文件（`findRelevantMemories.ts:21`），选取基于"filename + description"的紧凑清单，输入成本远低于全文；`alreadySurfaced` 与 `collectSurfacedMemories`（`attachments.ts:2305-2324`）保证同一文件不跨轮重复注入。选取器对"确定有用"的严格要求（"If you are unsure... do not include it"，`:22`）说明宁缺毋滥。年龄信息随 mtime 免费传递（`findRelevantMemories.ts:77`），消费端用 `memoryFreshnessNote` 给陈旧记忆附加"时间点观察"提示，声明其内容只代表记录时刻的状态。可迁移思想：长尾记忆系统的注入策略可以概括为"索引常驻 + 子集按需 + 去重 + 时效标注"，检索用一次廉价模型调用完成，全文读取只发生在被选中的少数文件上。
+```ts
+// 节流：每 N 个合格轮次运行一次；补跑任务不受节流约束
+if (!isTrailingRun) {
+  turnsSinceLastExtraction++
+  if (
+    turnsSinceLastExtraction <
+    (getFeatureValue_CACHED_MAY_BE_STALE('tengu_bramble_lintel', null) ?? 1)
+  ) {
+    return
+  }
+}
+turnsSinceLastExtraction = 0
+inProgress = true
 
-### 5.5 fork agent 共享 prompt cache 的时机控制
+// 清单预注入：把现有记忆清单放进抽取指引，agent 无需先花一轮列目录
+const existingMemories = formatMemoryManifest(
+  await scanMemoryFiles(memoryDir, createAbortController().signal),
+)
 
-`extractMemories` 与 `SessionMemory` 都使用 `runForkedAgent`：完美 fork 主对话、共享 system prompt 与消息前缀，从而命中同一份 prompt cache（`extractMemories.ts:1-14` 头部注释）。这份共享带来一组配套约束：fork 的工具列表必须与主对话一致（`createAutoMemCanUseTool` 的 REPL 分支注释，`extractMemories.ts:173-181`），安全靠 `canUseTool` 权限函数在运行时收口；抽取只处理"最近 N 条消息"的增量（游标机制），fork 的内容面始终有界；`skipTranscript` 与 `drainPendingExtraction`（`:608-612`）处理生命周期边界。可迁移思想：后台子任务复用主任务上下文缓存能显著降成本，但需要配齐"增量游标 + 权限收口 + 轮次上限 + 退出排空"四件套，否则缓存收益会被失控的运行成本抵消。
+// fork 运行：共享 prompt cache、轮次上限 5、跳过转写
+const result = await runForkedAgent({
+  promptMessages: [createUserMessage({ content: userPrompt })],
+  cacheSafeParams,
+  canUseTool,
+  querySource: 'extract_memories',
+  forkLabel: 'extract_memories',
+  skipTranscript: true,
+  maxTurns: 5,
+})
 
-### 5.6 安全护栏内置于路径层
+// 游标：只在成功运行后推进，失败时下轮重新考虑同批消息
+const lastMessage = messages.at(-1)
+if (lastMessage?.uuid) {
+  lastMemoryMessageUuid = lastMessage.uuid
+}
+```
 
-记忆目录涉及自动写入，路径校验是安全边界：`validateMemoryPath`（`paths.ts:109-150`）在路径解析阶段拒绝相对路径、根目录、Windows 盘符根、UNC 路径与 null byte；`getAutoMemPathSetting` 只信任 policy/local/user 三个设置来源，排除可被仓库控制的 projectSettings（`paths.ts:172-186`）；团队记忆的 `sanitizePathKey` 与双段包含性校验（`teamMemPaths.ts:22-64`、`:228-284`）防御 URL 编码、Unicode 归一化与符号链接逃逸；CLAUDE.md 的外部 include 默认关闭、需用户批准（`claudemd.ts:797-800`）。这些校验全部集中在路径解析层，业务代码拿到的是已验证的路径。可迁移思想：对"agent 可写目录"的自动持久化系统，把路径校验前置为独立模块（resolve → 白名单匹配 → realpath 对照），业务层只消费校验结果，安全成本与业务逻辑解耦。
+要点：
+
+- 节流计数放在一切昂贵操作之前（扫描、指引构建、fork 启动），不满足轮次条件时直接返回，零成本跳过；补跑任务是已承诺的工作，不受节流约束。
+- 清单预注入复用扫描组件的产出，抽取 agent 第一轮 Read 的目标更精确，并依据清单更新旧文件。
+- skipTranscript 与 maxTurns 对应两个失败模式：fork 写转写会与主线程产生竞争；硬上限防止 agent 陷入"验证某条记忆是否准确"的调查中，抽取指引本来就禁止它调查。
+- 游标语义保证抽取进度不丢：只有 fork 成功完成后才推进，失败时同批消息留待下一轮。
+
+### 2.4 团队记忆
+
+memdir 的 team 子目录，内容按仓库共享给组织内成员。团队记忆依赖自动记忆开启，所有消费方保持一致。
+
+**指引设计**：双目录组合指引同时给出私有与团队两个目录的路径与作用域说明；四类记忆各带作用域指引——user 恒为私有、feedback 默认私有、project 强烈倾向团队、reference 通常团队；团队侧有硬性规则：禁止在共享记忆中保存敏感数据。
+
+**服务器同步**：按 git remote 的仓库作用域同步。会话开始时拉取（服务器内容按键覆盖本地）；写入时增量上传（只上传哈希与服务器校验和不同的条目，服务器按 upsert 合并）；文件删除不传播。单文件与单批请求体都有字节上限，超过时分成多个顺序上传。
+
+**目录监听**：启动时先拉取一次，随后监听团队目录变化，2 秒防抖后推送。永久性失败（无认证、无仓库、客户端错误）会抑制重试，防止无限推送循环。
+
+**路径安全校验**：拒绝空字节、URL 编码穿越、Unicode 归一化攻击（全角字符在归一化后变成 ../）、反斜杠与绝对路径；写入前做双层包含性校验——先做字符串级路径解析检查，再解析最深已存在祖先的符号链接后与真实团队目录对照，封住符号链接逃逸。校验集中在路径解析层，业务代码拿到的是已验证的路径。
+
+### 2.5 SessionMemory 与压缩边界
+
+**会话内笔记**：模板划分 Current State、Task specification、Files and Functions、Workflow、Errors & Corrections、Learnings、Key results、Worklog 等区块，由后台 fork agent 按阈值维护——上下文达到 10 000 tokens 才初始化，之后每增长 5 000 tokens 或每 3 次工具调用考虑更新。
+
+**与 memdir 的分工**：memdir 面向未来对话（跨会话），SessionMemory 面向当前会话的压缩连续性；指引中明确写给模型：计划、任务、记忆各有用途，只对当前会话有用的信息不应进记忆。
+
+**压缩替代路径**：上下文需要压缩时，可以用会话笔记替代传统压缩摘要——等待进行中的笔记更新完成，读取笔记内容；笔记仍是空模板时回退到传统压缩；否则从上次摘要点之后保留消息（下限 10 000 tokens 或 5 条文本消息，上限 40 000 tokens），把截断后的笔记当作压缩摘要。
+
+## 3 关键流程
+
+### 3.1 CLAUDE.md 发现与合并
+
+```mermaid
+flowchart TD
+  A["会话启动，构建用户上下文"] --> B["发现组件 getMemoryFiles<br/>结果缓存，整会话执行一次"]
+  B --> C["Managed 层：策略文件与规则目录"]
+  B --> D["User 层：用户目录文件与规则"]
+  B --> E["从当前目录向上收集目录链"]
+  E --> F["翻转后从根目录向当前目录逐层处理<br/>CLAUDE.md / .claude/CLAUDE.md / rules / CLAUDE.local.md"]
+  F --> G["单文件解析：排除匹配、符号链接解析、<br/>frontmatter 剥离、@ include 递归与环检测"]
+  B --> H["AutoMem 索引与 TeamMem 索引"]
+  C & D & G & H --> R["有序数组<br/>数组顺序即优先级"]
+  R --> S["渲染组件 getClaudeMds<br/>生成指令文本"]
+  S --> T["注入用户上下文<br/>包装为 project-instructions 高权重消息"]
+```
+
+分步讲解：
+
+1. **入口**：构建用户上下文时调用发现组件，结果被缓存，整个会话只完整执行一次目录遍历；手动编辑记忆后可主动失效缓存。
+2. **Managed 层**：系统策略文件与对应规则目录，不依赖任何开关。
+3. **User 层**：用户设置启用时加载，始终允许引用工作目录之外的文件。
+4. **目录链构建**：从当前目录逐级上溯到根，翻转后得到"根 → 当前目录"顺序。
+5. **逐层加载**：每层依次尝试四种文件形态，靠近当前目录的文件后入数组，优先级更高。
+6. **单文件解析**：排除匹配、符号链接解析、读取、frontmatter 剥离、HTML 注释剥离、include 递归与环检测。
+7. **记忆目录入口**：MEMORY.md 索引与团队索引作为最后两类条目追加。
+8. **渲染**：每条内容拼成"路径 + 类型描述 + 内容"片段，整体加指令优先级前缀。
+9. **注入**：合并文本包装成高权重用户消息，与带"可能不相关"声明的背景信息分开，保持指令权重。
+
+### 3.2 自动抽取
+
+```mermaid
+flowchart TD
+  A["查询循环结束，模型产出最终回复"] --> B{"触发条件<br/>feature 开启 / 主 agent /<br/>自动记忆激活 / 非穷鬼模式"}
+  B -->|不满足| END1["跳过"]
+  B -->|满足| C{"进一步收窄<br/>仅主线程 / 记忆已启用 / 非远程"}
+  C -->|不满足| END1
+  C -->|满足| D{"上一次抽取仍在运行？"}
+  D -->|是| E["暂存本轮上下文<br/>当前运行结束后补跑"]
+  D -->|否| F{"写入互斥<br/>主 agent 已直接写过记忆？"}
+  F -->|是| G["跳过本轮，推进游标"]
+  F -->|否| H{"轮次节流<br/>距上次运行达到 N 轮？"}
+  H -->|否| END1
+  H -->|是| I["扫描现有记忆生成清单<br/>预注入抽取指引"]
+  I --> J["fork 后台 agent：共享 prompt cache<br/>轮次上限 5，工具权限收口"]
+  J --> K["两轮式写入：并行 Read 现有文件<br/>→ 并行 Write/Edit 主题文件与索引"]
+  K --> L["推进游标<br/>保存结果通知主线程"]
+```
+
+分步讲解：
+
+1. **触发**：查询循环收尾阶段检查开关链，满足后异步启动，不阻塞主线程；管道模式在退出前等待排空。
+2. **收窄**：排除子代理、记忆关闭、远程模式三种情况。
+3. **并发控制**：运行期间的新请求暂存为补跑任务；轮次节流控制运行频率。
+4. **互斥判定**：检查主 agent 是否已直接写过记忆文件，写过则跳过，保证每一轮只有一个写入方。
+5. **清单预注入**：复用扫描组件把现有记忆清单放进抽取指引，agent 依据它决定更新哪个旧文件，省去先列目录的一轮。
+6. **fork 运行**：与主对话共享 prompt cache，工具权限收口到只读 + 记忆目录内写入。
+7. **保存**：写主题文件与索引（每个主题一个文件，索引每行一条指针）。
+8. **反馈**：把保存的文件列表以系统消息追加给主线程。
+9. **游标推进**：仅成功运行后推进，失败时下轮重新考虑同批消息。
+
+### 3.3 每轮读取注入
+
+```mermaid
+flowchart TD
+  Q["每轮用户输入"] --> R["收集相关性附件"]
+  R --> S["相关性检索组件 findRelevantMemories"]
+  S --> T["扫描组件读取 frontmatter 清单<br/>类型 / 文件名 / 时间戳 / 描述"]
+  T --> U["轻量模型调用选取最多 5 个文件<br/>schema 约束输出"]
+  U --> V["过滤已展示文件<br/>读取选中文件全文"]
+  V --> W["relevant_memories 附件注入<br/>附带时效提示"]
+```
+
+分步讲解：
+
+1. **触发**：每轮用户输入进入查询循环前，触发相关性附件收集。
+2. **紧凑清单**：相关性检索组件先扫描得到"文件名 + 描述"的清单，输入成本远低于全文。
+3. **选取**：用一次轻量模型调用从清单中选取最多 5 个"确定有用"的文件，输出受 schema 约束；不确定的文件不选取。
+4. **去重**：已展示文件在调用前过滤，同一文件不跨轮重复注入。
+5. **注入**：读取选中文件全文，连同修改时间换算的时效提示一起以附件形式注入当轮请求。
+
+## 4 设计思想
+
+### 4.1 人工维护与自动抽取的分工
+
+CLAUDE.md 由人维护、随代码提交、可评审；memdir 由模型维护、跨会话积累。两者的边界由"不该保存什么"排除清单明文划定：能从代码推导的、git 历史能查的、CLAUDE.md 已写的、当前会话临时的内容都不进 memdir。自动抽取的时机控制也体现同一思路：只在查询循环结束时运行、每轮节流、主 agent 已写则跳过、fork 轮次硬上限 5 轮，把自动行为的成本与失控面都压到最低。可迁移思想：给自动持久化配齐"白名单类型 + 黑名单内容 + 时机节流"三重约束。
+
+### 4.2 就近加载的层级设计
+
+发现组件用数组顺序表达优先级：根目录文件先入数组，当前目录文件后入数组，渲染组件按序输出，模型读到"更近的指令更靠后"。该设计省掉了显式的优先级字段与排序逻辑，任何新增层级只需决定自己在数组中的插入位置。子目录级加载则把"就近"推到文件粒度：编辑某个子目录的文件时，只注入该子目录链上匹配 glob 的规则。可迁移思想：上下文分层系统可以用"有序数组 + 约定插入位置"表达优先级，用 glob 条件注入表达作用域，避免维护复杂的优先级配置。
+
+### 4.3 用文件系统当数据库
+
+memdir 没有数据库、没有索引服务：MEMORY.md 是索引（每行一条指向主题文件的指针），主题文件是记录，frontmatter 是 schema（name/description/type），扫描组件只读前 30 行完成检索前置扫描，相关性检索用一次轻量模型调用完成相关性排序。用户可以用编辑器直接查看与修改记忆，团队记忆直接监听目录变化推送。索引的治理靠硬上限：200 行、25KB、每行约 150 字符，超限截断并提示把细节移到主题文件。可迁移思想：当记录规模在数百以内、读写频率低时，Markdown 文件 + frontmatter + 单文件索引更透明、更易调试，把"模型可读、用户可读、工具可扫描"统一到同一种格式上。
+
+### 4.4 相关性子集检索控制 token
+
+记忆总量不可控，注入量必须可控，为此有三层裁剪：索引本身被行数与字节上限截断；相关性检索只注入最多 5 个文件，选取基于"文件名 + 描述"的紧凑清单，输入成本远低于全文；已展示集合保证同一文件不跨轮重复注入。选取器对"确定有用"的严格要求说明宁缺毋滥。年龄信息随修改时间传递，消费端给陈旧记忆附加"时间点观察"提示，声明其内容只代表记录时刻的状态。可迁移思想：长尾记忆系统的注入策略可以概括为"索引常驻 + 子集按需 + 去重 + 时效标注"，检索用一次廉价模型调用完成，全文读取只发生在被选中的少数文件上。
+
+### 4.5 fork agent 共享 prompt cache 的时机控制
+
+自动抽取与会话笔记都使用 fork agent：完整 fork 主对话、共享 system prompt 与消息前缀，从而命中同一份 prompt cache。这份共享带来一组配套约束：fork 的工具列表必须与主对话一致，安全靠权限函数在运行时收口；抽取只处理"最近 N 条消息"的增量（游标机制），fork 的内容面始终有界；跳过转写与退出排空处理生命周期边界。可迁移思想：后台子任务复用主任务上下文缓存能显著降低成本，但需要配齐"增量游标 + 权限收口 + 轮次上限 + 退出排空"四件套。
+
+### 4.6 安全护栏内置于路径层
+
+记忆目录涉及自动写入，路径校验是安全边界：路径解析阶段拒绝相对路径、根目录、Windows 盘符根、UNC 路径与空字节；目录设置只信任 policy/local/user 三个来源，排除可被仓库控制的 projectSettings；团队记忆拒绝 URL 编码、Unicode 归一化与符号链接逃逸；CLAUDE.md 的外部 include 默认关闭、需用户批准。这些校验全部集中在路径解析层，业务代码拿到的是已验证的路径。可迁移思想：对"agent 可写目录"的自动持久化系统，把路径校验前置为独立模块（解析 → 白名单匹配 → 真实路径对照），业务层只消费校验结果，安全成本与业务逻辑解耦。
