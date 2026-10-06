@@ -167,7 +167,7 @@ CLAUDE.md 体系分四个层级，加载顺序与优先级方向相反：
 - 附件提取组件从文本中识别 `@文件` 引用（支持行范围语法与带引号路径），读取文件内容生成 `AttachmentMessage` 跟在 user message 之后；
 - `processTextPrompt` 生成 promptId、记录遥测事件、判定否定与继续关键词，再调用 `createUserMessage`；有图像时文本块在前、图像块在后。
 
-`UserPromptSubmit` hooks 在 user message 生成后、查询前执行：支持阻断（返回 system 警告消息）、阻止继续与附加上下文注入。hooks 由运行时执行，模型只能看到执行结果注入回来的消息。
+`UserPromptSubmit` hooks 在 user message 生成后、查询前执行：支持阻断（返回 system 警告消息）、阻止继续与附加上下文注入。hooks 由运行时执行，模型只能看到执行结果注入回来的消息。附件消息排在 user message 之后、查询之前，与正文同轮送达模型。
 
 ## 3 关键流程
 
