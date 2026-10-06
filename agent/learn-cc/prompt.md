@@ -199,7 +199,7 @@ flowchart TD
 4. **动态 section 装配**：按字面量顺序构造 section 数组；普通 section 会话内缓存，`mcp_instructions` 每轮重算。
 5. **边界拼接**：静态片段、边界标记（仅 global 缓存模式插入）、动态片段拼成字符串数组。
 6. **优先级总装**：`buildEffectiveSystemPrompt` 按 override → coordinator → agent/custom/default 的优先级选出主提示词，`appendSystemPrompt` 恒追加。
-7. **API 层收尾**：前插归因头与 CLI 前缀；`appendSystemContext` 追加 git 状态产物。
+7. **API 层收尾**：前插归因头与 CLI 前缀（恒在数组最前，保证任何 provider 都能正确计费与识别客户端）；`appendSystemContext` 追加 git 状态产物。
 8. **缓存打标**：`splitSysPromptPrefix` 分块、`buildSystemPromptBlocks` 生成带 `cache_control` 的 system 参数数组。
 
 ### 3.2 用户输入到 user message 的转换流程
@@ -281,7 +281,7 @@ sequenceDiagram
     C->>S: 写 diff 文件、上报事件、清空 pendingChanges
 ```
 
-- 阶段一在请求前记账：对所有缓存键因子取哈希，与上一份快照比对，把差异记录为待解释的变更集合；按查询来源前缀过滤参与对象，仅主线程与特定 agent 参与追踪；
+- 阶段一在请求前记账：对所有缓存键因子取哈希，与上一份快照比对，把差异记录为待解释的变更集合；system 哈希取两份（含与不含 `cache_control`），因为断点标记本身会变化；按查询来源前缀过滤参与对象，仅主线程与特定 agent 参与追踪；
 - 阶段二在响应后归因：缓存读取下降超过 5% 且绝对量不低于 2000 token 才判定击穿，用阶段一的变更列表解释原因，结合时间差区分 TTL 过期与服务端路由，最终写 diff 文件并上报事件；
 - 压缩与缓存删除属于合法降读场景，检测组件通过基线重置避免误报；追踪键按查询来源前缀过滤，仅主线程与特定 agent 参与，避免子代理数据互相污染；
 - 两个阶段分离的意义：预测变更与证实击穿各自独立，先记账后归因，配合 token 阈值与时间差抑制误报。
