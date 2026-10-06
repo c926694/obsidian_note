@@ -441,4 +441,4 @@ Managed → User → Project → Local 的加载顺序与反向优先级、`@inc
 
 ### 5.7 指令与背景资料的职责切分
 
-日期、CLAUDE.md、git 状态通过 `prependUserContext` 与 `appendSystemContext` 注入消息层，system prompt 只保留指令本身。CLAUDE.md 单独包装成 `<project-instructions>` 高权重消息，其余背景信息包装成带"可能不相关"声明的 `<system-reminder>`。这个切分让指令与背景资料在模型眼中权重不同，且各自的缓存行为可以独立控制。
+日期、CLAUDE.md、git 状态通过 `prependUserContext` 与 `appendSystemContext` 注入消息层，system prompt 只保留指令本身。CLAUDE.md 单独包装成 `<project-instructions>` 高权重消息，其余背景信息包装成带"可能不相关"声明的 `<system-reminder>`。这个切分让指令与背景资料在模型眼中权重不同，且各自的缓存行为可以独立控制。git 状态快照明确声明是会话起始时刻的静态快照，会话中不更新，模型需要最新状态时应当自行运行 git 命令。
