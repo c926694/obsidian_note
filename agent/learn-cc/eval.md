@@ -131,7 +131,7 @@ flowchart TB
 
 ### 2.5 提示词迭代与 eval 文件
 
-**概念定义**：上游仓库用 `.eval.ts` 文件对提示词变体做受控评估（同一组测试场景分别跑不同提示词版本，统计通过数），评估结果作为设计证据写回源码注释。本仓库保留了这些注释，但 `.eval.ts` 文件本身未被保留。
+**概念定义**：上游仓库用 `.eval.ts` 文件对提示词变体做受控评估（同一组测试场景分别运行不同提示词版本，统计通过数），评估结果作为设计证据写回源码注释。本仓库保留了这些注释，但 `.eval.ts` 文件本身未被保留。
 
 **代码证据**（`memoryTypes.ts`）：
 
@@ -173,7 +173,7 @@ stateDiagram-v2
 1. **义务生效**：system prompt 组装时，`getSessionSpecificGuidanceSection` 在 `feature('VERIFICATION_AGENT')`、GrowthBook key `tengu_hive_evidence` 为真、穷鬼模式关闭三个条件下写入验证义务文本（`prompts.ts:374-381`）。触发标准是"非平凡实现"：3 个以上文件编辑、backend/API 变更、基础设施变更。
 2. **结构性提醒**：`TodoWriteTool.ts:72-84` 与 `TaskUpdateTool.ts:397` 在循环退出时刻（3 项以上任务全部完成且无 verification 步骤）追加提醒，防止"最后一个任务关闭后循环直接退出"的跳过路径。
 3. **启动验证代理**：主代理调用 `Agent` 工具并传 `subagent_type="verification"`；`AgentTool.tsx:377-382` 按 `agentType` 查找到 `VERIFICATION_AGENT` 定义，`AgentTool.tsx:410-415` 决定 `effectiveType`。
-4. **验证代理执行**：按 `verificationAgent.ts:42-49` 的通用基线（读 CLAUDE.md/README、跑构建、跑测试套件、跑 linter/类型检查、检查相关代码回归）加按变更类型适配的策略（30-40 行）加对抗探针（63-69 行）。
+4. **验证代理执行**：按 `verificationAgent.ts:42-49` 的通用基线（读取 CLAUDE.md/README、运行构建、运行测试套件、运行 linter/类型检查、检查相关代码回归）加按变更类型适配的策略（30-40 行）加对抗探针（63-69 行）。
 5. **判定输出**：报告以 `VERDICT: PASS` / `FAIL` / `PARTIAL` 结尾（`verificationAgent.ts:117-129`）。
 6. **FAIL 循环**：主代理修复后把发现与修复一起传给验证代理恢复运行，重复到 PASS（`prompts.ts:380` 的 `On FAIL: fix, resume the verifier with its findings plus your fix, repeat until PASS`）。
 7. **PASS 复核**：主代理重新运行报告中的 2-3 条命令，确认每条 PASS 都有 `Command run` 块且输出与重新运行的结果一致；缺失或不一致则恢复验证代理（`prompts.ts:380` 的 `On PASS: spot-check it`）。
@@ -328,7 +328,7 @@ Use the literal string \`VERDICT: \` followed by exactly one of \`PASS\`, \`FAIL
 
 讲解：
 
-- 报告格式以反例教学：给出一个"坏"报告（读了 `routes/auth.py` 就写 PASS）并标注 `(No command run. Reading code is not verification.)`，明确只有带 `Command run` 块的检查才是 PASS。
+- 报告格式以反例教学：给出一个"坏"报告（读取了 `routes/auth.py` 就写 PASS）并标注 `(No command run. Reading code is not verification.)`，明确只有带 `Command run` 块的检查才是 PASS。
 - 判定行协议刻意简化：固定前缀 `VERDICT: ` 加三个枚举之一，禁止 markdown、标点与变体，方便程序解析（`parsed by caller`）。
 - `PARTIAL` 的语义收窄为环境限制，禁止用 PARTIAL 表达"我不确定"；能运行就必须二选一，这一条与主代理侧"不能自我判定 PARTIAL"（`prompts.ts:380`）对偶。
 
@@ -405,7 +405,7 @@ describe('Opus 4.7 Prompt Engineering Audit', () => {
 
 ### 5.4 静态审计与动态验证互补
 
-审计 runner 验证提示词文本包含预期约束（静态，`toContain` 断言）；验证代理验证行为结果（动态，运行命令看输出）。静态审计成本低、可回归，防的是"提示词被改坏"；动态验证成本高、覆盖真实执行，防的是"模型没按提示词做"。两者检查对象不同，配合使用。
+审计 runner 验证提示词文本包含预期约束（静态，`toContain` 断言）；验证代理验证行为结果（动态，运行命令检查输出）。静态审计成本低、可回归，防的是"提示词被改坏"；动态验证成本高、覆盖真实执行，防的是"模型没按提示词做"。两者检查对象不同，配合使用。
 
 ### 5.5 评测确定性与覆盖通道
 
@@ -418,4 +418,4 @@ GrowthBook 的远程配置在评测环境里引入不确定性，`growthbook.ts`
 - **checklist 断言**：用 `getSystemPrompt()` 生成产物后做字符串断言（`promptEngineeringAudit.runner.ts:235-264`），并给每个断言标注来源文本，形成可追溯的提示词回归测试。
 - **子进程隔离**：把大量 `mock.module` 的审计放在独立 `bun test` 子进程（`promptEngineeringAudit.test.ts:18-22`），规避进程全局 mock 的污染问题。
 - **eval 结果写回注释**：`memoryTypes.ts` 的注释记录评测编号、通过数变化（0/2 → 3/3）、结论（位置影响效果、标题措辞影响效果），让提示词修改有数据依据。
-- **判定逻辑纯函数化**：`evaluateTimeBasedTrigger`（`microCompact.ts:426-450`）与 `ExitPlanModeScanner`（`ccrSession.ts:80`）都是无 I/O 的纯判定器，注释写明可以直接喂合成事件做单测。
+- **判定逻辑纯函数化**：`evaluateTimeBasedTrigger`（`microCompact.ts:426-450`）与 `ExitPlanModeScanner`（`ccrSession.ts:80`）都是无 I/O 的纯判定器，注释写明可以直接输入合成或录制的事件做单测与离线重放。

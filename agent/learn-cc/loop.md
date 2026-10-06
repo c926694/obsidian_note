@@ -90,7 +90,7 @@ flowchart LR
 
 ### 2.3 停止条件与中断
 
-**概念定义**：循环的所有退出路径统一收敛为 `Terminal` 可辨识联合类型（`src/query/transitions.ts:1-11`），包括 `completed`、`blocking_limit`、`image_error`、`model_error`、`aborted_streaming`、`aborted_tools`、`prompt_too_long`、`stop_hook_prevented`、`hook_stopped`、`max_turns`。用户中断（Escape/Ctrl+C）由 REPL 层调用 `abortController.abort('user-cancel')`，信号沿 `deps.callModel` 透传给 API 客户端，SDK 抛出 `APIUserAbortError`，循环在流结束后检查 `signal.aborted` 走中断分支。
+**概念定义**：循环的所有退出路径统一收敛为 `Terminal` 可辨识联合类型（`src/query/transitions.ts:1-11`），包括 `completed`、`blocking_limit`、`image_error`、`model_error`、`aborted_streaming`、`aborted_tools`、`prompt_too_long`、`stop_hook_prevented`、`hook_stopped`、`max_turns`。用户中断（Escape/Ctrl+C）由 REPL 层调用 `abortController.abort('user-cancel')`，信号沿 `deps.callModel` 原样传递给 API 客户端，SDK 抛出 `APIUserAbortError`，循环在流结束后检查 `signal.aborted` 走中断分支。
 
 **设计动机**：把「为什么结束」建模为带原因的联合类型，上层（`QueryEngine`）能据此映射出结构化的 SDK `result` 消息（例如 `max_turns_reached` attachment 映射为 `error_max_turns`，见 `QueryEngine.ts:885-918`）。
 
@@ -107,7 +107,7 @@ flowchart LR
 
 ### 2.4 compaction（上下文压缩）
 
-**概念定义**：上下文接近窗口上限时的压缩机制，分三个层次：`microcompact`（`microcompactMessages`，把 Read/Bash/Grep/Glob/WebSearch/WebFetch/Edit/Write 等工具的历史结果内容替换为占位文本）、`autocompact`（`autoCompactIfNeeded`，让模型生成摘要，用摘要消息替换整段历史，产出 `compact_boundary` 消息）、`reactiveCompact`（API 返回 413 prompt-too-long 之后被动触发）。压缩完成后循环用 `buildPostCompactMessages` 生成的新消息数组继续。
+**概念定义**：上下文接近窗口上限时的压缩机制，分三个层次：`microcompact`（`microcompactMessages`，清除 Read/Bash/Grep/Glob/WebSearch/WebFetch/Edit/Write 等工具的历史结果内容，占位文本常量见 `microCompact.ts:36`）、`autocompact`（`autoCompactIfNeeded`，让模型生成摘要，用摘要消息替换整段历史，产出 `compact_boundary` 消息）、`reactiveCompact`（API 返回 413 prompt-too-long 之后被动触发）。压缩完成后循环用 `buildPostCompactMessages` 生成的新消息数组继续。
 
 **设计动机**：主循环只负责「判定要不要压缩」与「替换 messages 继续跑」，压缩的具体实现（提示词、会话记忆压缩、事后清理）全部隔离在 `services/compact/` 目录；微压缩与自动压缩按顺序组合（先微压缩、再自动压缩），且微压缩只按 `tool_use_id` 操作、不读内容，与工具结果预算的替换逻辑可以干净组合。
 
@@ -135,7 +135,7 @@ flowchart LR
 - `QueryEngine.ts:688-699`：`for await (const message of query({...}))` 消费循环产出。
 - `QueryEngine.ts:253-281`：`wrappedCanUseTool` 包裹用户提供的 `canUseTool`，在权限拒绝时记录 `permissionDenials`（`QueryEngine.ts:271-278`）——编排层特有的记账，循环内部并不感知。
 - `QueryEngine.ts:670-686`：turn 级局部变量（`currentMessageUsage`、`turnCount`、`lastStopReason`）在每次 `submitMessage` 重置。
-- `query.ts:899-949`：`deps.callModel` 的 options 全部来自 `toolUseContext`（含 `getToolPermissionContext`、`abortController.signal` 透传），query.ts 自身没有 UI 类型依赖。
+- `query.ts:899-949`：`deps.callModel` 的 options 全部来自 `toolUseContext`（含 `getToolPermissionContext`、`abortController.signal` 原样传递），query.ts 自身没有 UI 类型依赖。
 - `REPL.tsx:3513-3523`：交互式路径直接 `for await (const event of query({...}))`，说明循环与终端 UI 之间只隔一层事件流。
 
 ## 3 关键流程
@@ -171,7 +171,7 @@ sequenceDiagram
 分步讲解：
 
 1. **进入循环**：REPL（`REPL.tsx:3513-3523`）或 `QueryEngine.submitMessage`（`QueryEngine.ts:688-699`）调用 `query(params)`；`query()` 做 trace 初始化后把控制权交给 `queryLoop`（`query.ts:320-324`）。
-2. **发起流式请求**：每轮迭代通过 `deps.callModel` 发起调用（`query.ts:899`），实际实现是 `queryModelWithStreaming`（`deps.ts:35`），`signal: toolUseContext.abortController.signal` 透传中止信号（`query.ts:904`）。
+2. **发起流式请求**：每轮迭代通过 `deps.callModel` 发起调用（`query.ts:899`），实际实现是 `queryModelWithStreaming`（`deps.ts:35`），`signal: toolUseContext.abortController.signal` 把中止信号原样传入（`query.ts:904`）。
 3. **SDK 请求经重试层**：`claude.ts:1874-1941` 用 `withRetry` 包裹 `anthropic.beta.messages.create({...params, stream: true})`；`claude.ts:1944-1952` 逐个取出生成器值，非流对象直接 yield（作为 API 错误消息），最终拿到 `Stream<BetaRawMessageStreamEvent>`。
 4. **事件累积**：`message_start` 记录 `partialMessage`、ttft 与初始 usage（`claude.ts:2076-2089`）；`content_block_start` 为 `tool_use` 建 `input: ''` 骨架（`claude.ts:2093-2098`）；`input_json_delta` 拼接 `delta.partial_json`（`claude.ts:2209`）。
 5. **块完成即产出**：`content_block_stop` 合并文本增量并构造 `AssistantMessage`（`claude.ts:2297-2314`），`yield m` 立刻交给上层（`claude.ts:2316`）；`query.ts:1076-1078` 转手 yield。
@@ -211,7 +211,7 @@ flowchart TD
 1. **迭代开始**（`query.ts:460-474`）：`while (true)` 顶部解构 `state`，`messages`、`turnCount` 等以裸名参与本轮计算。
 2. **自动压缩判定**（`query.ts:652-665`）：`deps.autocompact` 内部先查 `shouldAutoCompact`（`autoCompact.ts:297-306`）——token 估算值达到 `getAutoCompactThreshold` 即触发；连续失败达到 3 次时熔断跳过（`autoCompact.ts:289-294`）。压缩成功后 `tracking` 重置（`query.ts:719-724`），新消息数组替换 `messagesForQuery`（`query.ts:733`）。
 3. **阻塞上限**（`query.ts:826-846`）：仅当本轮未压缩、querySource 允许、且自动压缩关闭时才检查 `isAtBlockingLimit`，到达上限则 yield 错误消息并返回 `blocking_limit`，为手动 `/compact` 保留空间。
-4. **预测性压缩**（`query.ts:852-888`）：用 `estimateMaxTurnGrowth`（`autoCompact.ts:88-94`，等于模型最大输出加 15000 token 工具结果估计）预估本轮增长，`currentTokens > effectiveWindow - estimatedGrowth` 时提前压缩。
+4. **预测性压缩**（`query.ts:852-888`）：用 `estimateMaxTurnGrowth`（`autoCompact.ts:88-94`，等于 min(模型最大输出, 20000) 加 15000 token 的工具结果增长估计）预估本轮增长，`currentTokens > effectiveWindow - estimatedGrowth` 时提前压缩。
 5. **流式消费与异常分流**（`query.ts:894-1258`）：`FallbackTriggeredError` 表示重试层要求换模型，循环切 `fallbackModel`、清空本轮累积、`continue` 重试（`query.ts:1152-1208`）；其余异常统一 yield 错误消息并返回 `model_error`（`query.ts:1213-1258`）。
 6. **中断优先**（`query.ts:1302-1338`）：流结束后最先检查 `signal.aborted`，补足缺失的 `tool_result` 后返回 `aborted_streaming`。
 7. **无工具调用的停止判定**（`query.ts:1349-1647`）：依次处理 413 prompt-too-long 恢复（collapse 排水 → reactive compact，`query.ts:1357-1470`）、`max_output_tokens` 恢复（先升级 64K 重试一次，再注入「从中断处继续」的 meta 消息，上限 3 次，`query.ts:1475-1543`）、API 错误提前返回（`query.ts:1549-1555`）、stop hook 的阻塞与阻止（`query.ts:1557-1596`）、token budget 继续或终止（`query.ts:1598-1645`），最后返回 `completed`（`query.ts:1647`）。

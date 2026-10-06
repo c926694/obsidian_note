@@ -513,7 +513,7 @@ memdir 没有数据库、没有索引服务：`MEMORY.md` 是索引（每行一�
 
 ### 5.4 相关性子集检索控制 token
 
-记忆总量不可控，注入量必须可控，为此有三层裁剪：MEMORY.md 索引本身被行数/字节上限截断（`truncateEntrypointContent`）；`findRelevantMemories` 只注入最多 5 个文件（`findRelevantMemories.ts:21`），选取基于"filename + description"的紧凑清单，输入成本远低于全文；`alreadySurfaced` 与 `collectSurfacedMemories`（`attachments.ts:2305-2324`）保证同一文件不跨轮重复注入。选取器对"确定有用"的严格要求（"If you are unsure... do not include it"，`:22`）说明宁缺毋滥。年龄信息随 mtime 免费传递（`findRelevantMemories.ts:77`），消费端用 `memoryFreshnessNote` 把陈旧记忆标成"时间点观察"而非事实。可迁移思想：长尾记忆系统的注入策略可以概括为"索引常驻 + 子集按需 + 去重 + 时效标注"，检索用一次廉价模型调用完成，全文读取只发生在被选中的少数文件上。
+记忆总量不可控，注入量必须可控，为此有三层裁剪：MEMORY.md 索引本身被行数/字节上限截断（`truncateEntrypointContent`）；`findRelevantMemories` 只注入最多 5 个文件（`findRelevantMemories.ts:21`），选取基于"filename + description"的紧凑清单，输入成本远低于全文；`alreadySurfaced` 与 `collectSurfacedMemories`（`attachments.ts:2305-2324`）保证同一文件不跨轮重复注入。选取器对"确定有用"的严格要求（"If you are unsure... do not include it"，`:22`）说明宁缺毋滥。年龄信息随 mtime 免费传递（`findRelevantMemories.ts:77`），消费端用 `memoryFreshnessNote` 给陈旧记忆附加"时间点观察"提示，声明其内容只代表记录时刻的状态。可迁移思想：长尾记忆系统的注入策略可以概括为"索引常驻 + 子集按需 + 去重 + 时效标注"，检索用一次廉价模型调用完成，全文读取只发生在被选中的少数文件上。
 
 ### 5.5 fork agent 共享 prompt cache 的时机控制
 
