@@ -101,7 +101,7 @@ section 的**顺序**由 `getSystemPrompt` 中的 `dynamicSections` 数组字面
 5. 兜底三元链：agent 提示词 → `customSystemPrompt`（命令行传入）→ `defaultSystemPrompt`（即 `getSystemPrompt` 的产物）；
 6. `appendSystemPrompt` 在所有非 override 分支中恒追加在末尾。
 
-该组件是提示词构建流水线的收口：它消费 `getSystemPrompt` 的产物作为 `defaultSystemPrompt`，输出最终交给切分与打标组件。
+该组件是提示词构建流水线的收口：它消费 `getSystemPrompt` 的产物作为 `defaultSystemPrompt`，输出最终交给切分与打标组件。它的输入全部来自外部调用方，自身无 I/O，属于纯优先级判定函数，便于单元测试。
 
 ### 2.4 运行时上下文组件：getUserContext / getSystemContext
 
