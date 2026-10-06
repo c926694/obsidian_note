@@ -131,7 +131,7 @@ CLAUDE.md 体系分四个层级，加载顺序与优先级方向相反：
 
 **注入组件**把上下文组件产出的内容放进消息层，并区分权重：
 
-- `prependUserContext` 把 `claudeMd` 单独包装成 `<project-instructions>` 的 `isMeta` user message（模型可见、界面不显示），让它保持指令权重，避免埋进带"可能不相关"免责声明的通用提醒里；其余上下文（日期等）包装成 `<system-reminder>`；
+- `prependUserContext` 把 `claudeMd` 单独包装成 `<project-instructions>` 的 `isMeta` user message（模型可见、界面不显示），让它保持指令权重，避免埋进带"可能不相关"免责声明的通用提醒里；其余上下文（日期等）包装成 `<system-reminder>`；两类包装共用 `isMeta` 标记，上下文文本不占用终端界面；
 - `appendSystemContext` 把 git 状态快照追加到 system prompt 尾部。
 
 **切分组件** `splitSysPromptPrefix` 在 global 缓存模式启用时，用单次查找定位边界标记，把 system prompt 数组切成最多四块并标注 `cacheScope`：
